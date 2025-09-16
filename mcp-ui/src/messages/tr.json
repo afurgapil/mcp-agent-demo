@@ -1,0 +1,62 @@
+{
+  "title": "MCP UI",
+  "subtitle": "Doğal dilden MCP Toolbox araçlarına",
+  "theme": {
+    "light": "Açık",
+    "dark": "Koyu",
+    "switchToLight": "Açığa geç",
+    "switchToDark": "Koyuya geç"
+  },
+  "status": {
+    "working": "Çalışıyor",
+    "ready": "Hazır",
+    "idle": "Boşta"
+  },
+  "form": {
+    "placeholder": "örn., gateway_data içine 10 sahte satır ekle",
+    "send": "Gönder",
+    "sending": "Gönderiliyor...",
+    "clear": "Temizle"
+  },
+  "plan": {
+    "title": "Plan",
+    "hide": "Gizle",
+    "show": "Göster",
+    "single": "Tek adımlı plan",
+    "rationale": "Gerekçe:"
+  },
+  "steps": {
+    "title": "Adımlar",
+    "hide": "Gizle",
+    "show": "Göster"
+  },
+  "summary": {
+    "title": "Özet"
+  },
+  "result": {
+    "title": "Sonuç",
+    "table": "Tablo",
+    "json": "JSON",
+    "noTable": "Gösterilecek tablo verisi yok"
+  },
+  "table": {
+    "showing": "İlk {shown} satır gösteriliyor, toplam {total}"
+  },
+  "loader": {
+    "title": "İsteğiniz işleniyor…",
+    "footer1": "Araçlar derleniyor ve adımlar doğrulanıyor…",
+    "footer2": "Süre: belirsiz"
+  },
+  "error": {
+    "requestFailed": "İstek başarısız oldu"
+  },
+  "common": {
+    "copy": "Kopyala",
+    "loading": "Yükleniyor...",
+    "rawResponse": "Ham Yanıt",
+    "timeline": "Zaman Çizelgesi",
+    "step": "Adım",
+    "error": "Hata",
+    "success": "Başarılı"
+  }
+}

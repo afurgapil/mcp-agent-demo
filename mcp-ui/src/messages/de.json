@@ -1,0 +1,62 @@
+{
+  "title": "MCP UI",
+  "subtitle": "Von natürlicher Sprache zu MCP Toolbox Tools",
+  "theme": {
+    "light": "Hell",
+    "dark": "Dunkel",
+    "switchToLight": "Zu hell wechseln",
+    "switchToDark": "Zu dunkel wechseln"
+  },
+  "status": {
+    "working": "Arbeitet",
+    "ready": "Bereit",
+    "idle": "Leerlauf"
+  },
+  "form": {
+    "placeholder": "z.B. 10 Mock-Zeilen in gateway_data einfügen",
+    "send": "Senden",
+    "sending": "Senden...",
+    "clear": "Leeren"
+  },
+  "plan": {
+    "title": "Plan",
+    "hide": "Verbergen",
+    "show": "Anzeigen",
+    "single": "Ein-Schritt-Plan",
+    "rationale": "Begründung:"
+  },
+  "steps": {
+    "title": "Schritte",
+    "hide": "Verbergen",
+    "show": "Anzeigen"
+  },
+  "summary": {
+    "title": "Zusammenfassung"
+  },
+  "result": {
+    "title": "Ergebnis",
+    "table": "Tabelle",
+    "json": "JSON",
+    "noTable": "Keine tabellarischen Daten anzuzeigen"
+  },
+  "table": {
+    "showing": "Erste {shown} von {total} Zeilen werden angezeigt"
+  },
+  "loader": {
+    "title": "Modell verarbeitet Ihre Anfrage…",
+    "footer1": "Werkzeuge werden zusammengestellt und Schritte validiert…",
+    "footer2": "ETA: unbestimmt"
+  },
+  "error": {
+    "requestFailed": "Anfrage fehlgeschlagen"
+  },
+  "common": {
+    "copy": "Kopieren",
+    "loading": "Wird geladen...",
+    "rawResponse": "Rohantwort",
+    "timeline": "Zeitstrahl",
+    "step": "Schritt",
+    "error": "Fehler",
+    "success": "Erfolg"
+  }
+}

@@ -1,0 +1,32 @@
+# local configs
+tools.yaml
+*/.env
+**/.env
+**/.env.*
+!**/.env.example
+!tools.yaml.example
+
+node_modules
+.next
+dist
+build
+out
+.turbo
+.vercel
+coverage
+.nyc_output
+.cache
+
+# system/editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
