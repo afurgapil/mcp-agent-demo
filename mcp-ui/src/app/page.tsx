@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { useLocale, useTranslations } from "next-intl";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3001";
 
@@ -52,14 +51,13 @@ function extractRows(result: unknown): Array<Record<string, unknown>> {
 }
 
 function DataTable({ rows }: { rows: Array<Record<string, unknown>> }) {
-  const t = useTranslations();
   if (!rows || rows.length === 0) return null;
   const cols = Array.from(new Set(rows.flatMap((o) => Object.keys(o))));
   const limited = rows.slice(0, 50);
   return (
-    <div className="overflow-x-auto border border-gray-200 dark:border-gray-800 rounded-lg mt-2 shadow-sm">
+    <div className="overflow-x-auto border border-zinc-800 rounded-lg mt-2 shadow-sm">
       <table className="min-w-full text-left text-sm">
-        <thead className="bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+        <thead className="bg-zinc-900 text-gray-300">
           <tr>
             {cols.map((c) => (
               <th key={c} className="px-3 py-2 font-medium whitespace-nowrap">
@@ -72,7 +70,7 @@ function DataTable({ rows }: { rows: Array<Record<string, unknown>> }) {
           {limited.map((row, i) => (
             <tr
               key={i}
-              className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/60 dark:hover:bg-gray-900/60 transition"
+              className="border-t border-zinc-800 hover:bg-zinc-900/60 transition"
             >
               {cols.map((c) => (
                 <td
@@ -88,7 +86,7 @@ function DataTable({ rows }: { rows: Array<Record<string, unknown>> }) {
       </table>
       {rows.length > limited.length && (
         <div className="px-3 py-2 text-xs text-gray-500">
-          {t("table.showing", { shown: limited.length, total: rows.length })}
+          Showing first {limited.length} rows of {rows.length}
         </div>
       )}
     </div>
@@ -105,110 +103,9 @@ function formatCell(v: unknown): string {
   }
 }
 
-function ThemeToggle() {
-  const t = useTranslations();
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    try {
-      const ls = localStorage.getItem("theme");
-      const prefersDark =
-        typeof window !== "undefined" &&
-        window.matchMedia &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const initial = ls
-        ? ls === "dark"
-          ? "dark"
-          : "light"
-        : prefersDark
-        ? "dark"
-        : "light";
-      setTheme(initial);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  function applyTheme(next: "light" | "dark") {
-    const root = document.documentElement;
-    const reduceMotion =
-      window.matchMedia &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!reduceMotion) root.classList.add("theme-animating");
-    if (next === "dark") root.classList.add("dark");
-    else root.classList.remove("dark");
-    try {
-      localStorage.setItem("theme", next);
-    } catch {
-      // ignore
-    }
-    setTheme(next);
-    if (!reduceMotion) {
-      window.setTimeout(() => root.classList.remove("theme-animating"), 260);
-    }
-  }
-
-  const toggled = theme === "dark" ? "light" : "dark";
-
-  return (
-    <button
-      type="button"
-      onClick={() => applyTheme(toggled)}
-      aria-label="Toggle theme"
-      className="px-2 py-1 h-8 rounded-lg border border-gray-300 dark:border-gray-700 text-sm bg-white/60 dark:bg-zinc-900/60 hover:bg-gray-50/60 dark:hover:bg-zinc-900/80 inline-flex items-center gap-2"
-      title={
-        theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")
-      }
-    >
-      <span className="text-base" aria-hidden>
-        {theme === "dark" ? "🌞" : "🌙"}
-      </span>
-      <span className="text-xs text-gray-600 dark:text-gray-300">
-        {theme === "dark" ? t("theme.light") : t("theme.dark")}
-      </span>
-    </button>
-  );
-}
-
-function LanguageSwitcher() {
-  const locale = useLocale() as "en" | "tr" | "de";
-  const languages = [
-    { code: "tr", label: "🇹🇷" },
-    { code: "en", label: "🇺🇸" },
-    { code: "de", label: "🇩🇪" },
-  ] as const;
-
-  function changeLanguage(code: "en" | "tr" | "de") {
-    try {
-      document.cookie = `locale=${code}; path=/; max-age=${60 * 60 * 24 * 365}`;
-      window.location.reload();
-    } catch {
-      // ignore
-    }
-  }
-
-  return (
-    <div>
-      <select
-        aria-label="Select language"
-        className="px-2 py-1 h-8 rounded-lg border border-gray-300 dark:border-gray-700 text-sm bg-white/60 dark:bg-zinc-900/60 hover:bg-gray-50/60 dark:hover:bg-zinc-900/80"
-        value={locale}
-        onChange={(e) => changeLanguage(e.target.value as "en" | "tr" | "de")}
-      >
-        {languages.map((lang) => (
-          <option key={lang.code} value={lang.code}>
-            {lang.label} {lang.code.toUpperCase()}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 export default function Home() {
-  const t = useTranslations();
-  const currentLocale = useLocale() as "en" | "tr" | "de";
   const [query, setQuery] = useState("");
+  const [customSchema, setCustomSchema] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -226,6 +123,13 @@ export default function Home() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Validation: query must be provided
+    if (!query.trim()) {
+      setError("Lütfen sorgu girin");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setPlan(null);
@@ -237,9 +141,11 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept-Language": currentLocale,
         },
-        body: JSON.stringify({ query, locale: currentLocale }),
+        body: JSON.stringify({
+          query,
+          customSchema: customSchema,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || res.statusText);
@@ -255,56 +161,75 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen page-bg-transition bg-gradient-to-b from-white to-gray-50 dark:from-black dark:to-zinc-950 text-black dark:text-white">
+    <div className="min-h-screen bg-black text-white">
       <div className="max-w-5xl mx-auto p-6">
         <header className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {t("title")}
-            </h1>
-            <p className="text-sm text-gray-500">{t("subtitle")}</p>
+            <h1 className="text-2xl font-semibold tracking-tight">MCP UI</h1>
+            <p className="text-sm text-gray-400">
+              From natural language to MCP Toolbox tools
+            </p>
           </div>
           <div className="flex items-center gap-3">
-            <ThemeToggle />
-            <LanguageSwitcher />
             <span
               className={`text-xs px-3 h-8 inline-flex items-center rounded-lg ${
                 loading
-                  ? "bg-amber-100 text-amber-700"
+                  ? "bg-amber-900/40 text-amber-300"
                   : hasResults
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-600"
+                  ? "bg-emerald-900/40 text-emerald-300"
+                  : "bg-zinc-800 text-zinc-300"
               }`}
             >
-              {loading
-                ? t("status.working")
-                : hasResults
-                ? t("status.ready")
-                : t("status.idle")}
+              {loading ? "Çalışıyor" : hasResults ? "Hazır" : "Boşta"}
             </span>
           </div>
         </header>
 
         <form onSubmit={handleSubmit} className="space-y-3">
-          <textarea
-            className="w-full h-32 rounded-xl border border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-zinc-900/60 p-3 text-sm focus:outline-none focus:ring-4 focus:ring-blue-500/30 shadow-sm"
-            placeholder={t("form.placeholder")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium mb-1 text-zinc-100">
+                Sorgu
+              </label>
+              <textarea
+                className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm"
+                placeholder={"örn., students tablosuna 10 satır ekle"}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 text-zinc-100">
+                Veritabanı Şeması (Opsiyonel)
+              </label>
+              <textarea
+                className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
+                placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
+
+CREATE TABLE students (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT
+);`}
+                value={customSchema}
+                onChange={(e) => setCustomSchema(e.target.value)}
+              />
+            </div>
+          </div>
           <div className="flex gap-3">
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-105"
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110"
               disabled={loading || !query.trim()}
             >
-              {loading ? t("form.sending") : t("form.send")}
+              {loading ? "Gönderiliyor..." : "Gönder"}
             </button>
             <button
               type="button"
-              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm hover:bg-gray-50/60 dark:hover:bg-zinc-900/60"
+              className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
               onClick={() => {
                 setQuery("");
+                setCustomSchema("");
                 setError(null);
                 setPlan(null);
                 setSummary(null);
@@ -312,78 +237,101 @@ export default function Home() {
                 setExecSteps([]);
               }}
             >
-              {t("form.clear")}
+              Temizle
             </button>
           </div>
         </form>
 
         {/* Primary Result right under input */}
-        {(finalResult || summary) && (
+        {finalResult ? (
           <ResultCard
-            result={finalResult}
-            summary={summary || undefined}
+            result={finalResult as Record<string, unknown>}
             loading={loading}
           />
-        )}
+        ) : null}
 
         <div className="mt-6 grid grid-cols-1  gap-4">
           {error && (
-            <div className="rounded-lg border border-red-300 bg-red-50 text-red-700 p-3 text-sm md:col-span-2">
+            <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
               Error: {error}
             </div>
           )}
-          {plan && (
+          {false && (
             <div className="rounded-xl w-full border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
               <header className="flex items-center justify-between px-4 py-3">
-                <h2 className="font-medium">{t("plan.title")}</h2>
+                <h2 className="font-medium">Plan</h2>
                 <button
                   onClick={() => setOpenPlan((v) => !v)}
                   className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
                 >
-                  {openPlan ? t("plan.hide") : t("plan.show")}
+                  {openPlan ? "Gizle" : "Göster"}
                 </button>
               </header>
               {openPlan && (
                 <div className="px-4 pb-4">
-                  {Array.isArray(plan.steps) && plan.steps.length > 0 ? (
-                    <PlanRoadmap steps={plan.steps} />
+                  {Array.isArray(plan?.steps) && plan!.steps!.length > 0 ? (
+                    <PlanRoadmap steps={plan!.steps as Step[]} />
                   ) : (
                     <div className="rounded bg-gray-50 dark:bg-gray-900 p-2 text-sm">
-                      {t("plan.single")}
+                      Tek adımlı plan
                     </div>
                   )}
-                  {plan.rationale && (
+                  {plan?.rationale && (
                     <div className="mt-3 text-sm">
-                      <span className="font-semibold">
-                        {t("plan.rationale")}
-                      </span>{" "}
-                      {plan.rationale}
+                      <span className="font-semibold">Gerekçe: </span>
+                      {plan?.rationale}
                     </div>
                   )}
                 </div>
               )}
             </div>
           )}
-          {execSteps.length > 0 && (
+          {false && (
             <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
               <header className="flex items-center justify-between px-4 py-3">
-                <h2 className="font-medium">{t("steps.title")}</h2>
+                <h2 className="font-medium">Adımlar</h2>
                 <button
                   onClick={() => setOpenSteps((v) => !v)}
                   className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
                 >
-                  {openSteps ? t("steps.hide") : t("steps.show")}
+                  {openSteps ? "Gizle" : "Göster"}
                 </button>
               </header>
               {openSteps && <StepTimeline steps={execSteps} />}
             </div>
           )}
-          {summary && (
+          {false && (
             <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-              <h2 className="font-medium mb-2">{t("summary.title")}</h2>
+              <h2 className="font-medium mb-2">Özet</h2>
               <p className="text-sm whitespace-pre-wrap">{summary}</p>
             </div>
           )}
+          {/* AI Raw Response */}
+          {raw && (raw as Record<string, unknown>).sql ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
+              <h3 className="text-sm font-medium mb-2">
+                AI&apos;dan Gelen Response
+              </h3>
+              <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
+                {String((raw as Record<string, unknown>).sql)}
+              </pre>
+            </div>
+          ) : null}
+
+          {/* SQL Execution Result */}
+          {raw && (raw as Record<string, unknown>).executionResult ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
+              <h3 className="text-sm font-medium mb-2">SQL Execution Result</h3>
+              <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
+                {JSON.stringify(
+                  (raw as Record<string, unknown>).executionResult,
+                  null,
+                  2
+                )}
+              </pre>
+            </div>
+          ) : null}
+
           {raw != null && (
             <details className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
               <summary className="cursor-pointer text-sm">Raw Response</summary>
@@ -408,13 +356,12 @@ function ResultCard({
   summary?: string;
   loading?: boolean;
 }) {
-  const t = useTranslations();
   const [tab, setTab] = useState<"table" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
   return (
     <div className="mt-4 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white/70 dark:bg-zinc-900/50 shadow">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium">{t("result.title")}</h2>
+        <h2 className="font-medium">Sonuç</h2>
         <div className="flex gap-2 text-xs">
           <button
             onClick={() => setTab("table")}
@@ -424,7 +371,7 @@ function ResultCard({
                 : "bg-gray-200 dark:bg-gray-800"
             }`}
           >
-            {t("result.table")}
+            Tablo
           </button>
           <button
             onClick={() => setTab("json")}
@@ -434,23 +381,21 @@ function ResultCard({
                 : "bg-gray-200 dark:bg-gray-800"
             }`}
           >
-            {t("result.json")}
+            JSON
           </button>
         </div>
       </div>
-      {summary && (
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-          {summary}
-        </p>
-      )}
+      {summary && <p className="mt-2 text-sm text-gray-600">{summary}</p>}
       <div className="mt-3">
         {loading ? (
-          <div className="text-sm text-gray-500">{t("common.loading")}</div>
+          <div className="text-sm text-gray-500">Yükleniyor...</div>
         ) : tab === "table" ? (
           rows.length > 0 ? (
             <DataTable rows={rows} />
           ) : (
-            <div className="text-xs text-gray-500">{t("result.noTable")}</div>
+            <div className="text-xs text-gray-500">
+              Gösterilecek tablo verisi yok
+            </div>
           )
         ) : (
           <pre className="text-xs whitespace-pre-wrap break-words">
@@ -582,10 +527,9 @@ function LoadingOverlay() {
 }
 
 function StepTimeline({ steps }: { steps: StepResult[] }) {
-  const t = useTranslations();
   return (
     <div className="px-4 pb-4">
-      <h3 className="font-medium mb-2">{t("common.timeline")}</h3>
+      <h3 className="font-medium mb-2">Zaman Çizelgesi</h3>
       <ol className="relative border-l border-gray-200 dark:border-gray-800 ml-2 h-96 overflow-auto pr-2 custom-scroll">
         {steps.map((st) => (
           <li key={st.index} className="ml-4 mb-4">
@@ -599,7 +543,7 @@ function StepTimeline({ steps }: { steps: StepResult[] }) {
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
               <div className="flex items-center justify-between">
                 <div className="font-semibold text-sm">
-                  {t("common.step")} {st.index + 1}:{" "}
+                  Adım {st.index + 1}:{" "}
                   <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
                     {st.tool}
                   </span>
@@ -611,7 +555,7 @@ function StepTimeline({ steps }: { steps: StepResult[] }) {
                       : "bg-emerald-100 text-emerald-700"
                   }`}
                 >
-                  {st.error ? t("common.error") : t("common.success")}
+                  {st.error ? "Hata" : "Başarılı"}
                 </span>
               </div>
               {st.args && (
@@ -633,7 +577,6 @@ function StepTimeline({ steps }: { steps: StepResult[] }) {
 }
 
 function StepResultViewer({ result }: { result: unknown }) {
-  const t = useTranslations();
   const [tab, setTab] = useState<"table" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
   const hasRows = rows.length > 0;
@@ -648,7 +591,7 @@ function StepResultViewer({ result }: { result: unknown }) {
               : "bg-gray-200 dark:bg-gray-800"
           }`}
         >
-          {t("result.table")}
+          Tablo
         </button>
         <button
           onClick={() => setTab("json")}
@@ -658,7 +601,7 @@ function StepResultViewer({ result }: { result: unknown }) {
               : "bg-gray-200 dark:bg-gray-800"
           }`}
         >
-          {t("result.json")}
+          JSON
         </button>
         <button
           onClick={() =>
@@ -666,7 +609,7 @@ function StepResultViewer({ result }: { result: unknown }) {
           }
           className="ml-auto px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 hover:brightness-105"
         >
-          {t("common.copy")}
+          Kopyala
         </button>
       </div>
       <div className="mt-2">
@@ -674,7 +617,9 @@ function StepResultViewer({ result }: { result: unknown }) {
           hasRows ? (
             <DataTable rows={rows} />
           ) : (
-            <div className="text-xs text-gray-500">{t("result.noTable")}</div>
+            <div className="text-xs text-gray-500">
+              Gösterilecek tablo verisi yok
+            </div>
           )
         ) : (
           <pre className="text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto custom-scroll">
