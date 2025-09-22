@@ -6,6 +6,7 @@ const {
   MCP_TOOLBOX_URL,
   PORT = 3001,
   CUSTOM_LLM_URL = "http://192.168.1.113:8000/api/generate",
+  THINKING_LLM_URL = "http://192.168.1.113:8001/api/generate",
 } = process.env;
 
 if (!MCP_TOOLBOX_URL) {
@@ -14,45 +15,190 @@ if (!MCP_TOOLBOX_URL) {
 }
 const MCP_BASE = MCP_TOOLBOX_URL.trim().replace(/\/$/, "");
 
-// Simple HTTP LLM text generation
+// Check if thinking model is available
+let thinkingModelAvailable = null;
+async function checkThinkingModel() {
+  if (thinkingModelAvailable !== null) return thinkingModelAvailable;
+
+  try {
+    const testRes = await fetch(THINKING_LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "test", max_tokens: 10 }),
+      signal: AbortSignal.timeout(3000), // 3 second timeout
+    });
+    thinkingModelAvailable = testRes.ok;
+    console.log(`Thinking model availability: ${thinkingModelAvailable}`);
+  } catch (err) {
+    thinkingModelAvailable = false;
+    console.log(`Thinking model not available: ${err.message}`);
+  }
+
+  return thinkingModelAvailable;
+}
+
+// Thinking model - first stage LLM that processes user intent
+async function callThinkingModel(userMessage, opts = {}) {
+  const bodyPayload = {
+    message: userMessage,
+    max_tokens: opts.max_tokens || 200,
+  };
+
+  console.log(
+    "Calling Thinking Model with:",
+    JSON.stringify(bodyPayload, null, 2)
+  );
+
+  try {
+    const res = await fetch(THINKING_LLM_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bodyPayload),
+      signal: AbortSignal.timeout(10000), // 10 second timeout
+    });
+
+    const data = await res.json();
+    console.log("Thinking Model Response:", JSON.stringify(data, null, 2));
+
+    if (!res.ok) {
+      const errMsg = data?.error || data?.detail || res.statusText;
+      throw new Error(`Thinking model error ${res.status}: ${errMsg}`);
+    }
+
+    const response = data?.response;
+    if (!response) {
+      console.log("Available thinking model data keys:", Object.keys(data));
+      throw new Error("Empty response from thinking model");
+    }
+
+    return response;
+  } catch (err) {
+    console.log(`Thinking model call failed: ${err.message}`);
+    throw err;
+  }
+}
+
+// Fallback function when thinking model is not available
+function processQueryWithoutThinking(userQuery) {
+  console.log("Using fallback query processing (no thinking model)");
+
+  // Simple query preprocessing without AI
+  let processedQuery = userQuery.trim();
+
+  // Basic Turkish to English technical terms
+  const turkishTerms = {
+    kamera: "camera",
+    sensör: "sensor",
+    sıcaklık: "temperature",
+    veri: "data",
+    göster: "show",
+    getir: "get",
+    listele: "list",
+    sayı: "count",
+    aktif: "active",
+    pasif: "inactive",
+  };
+
+  // Replace Turkish terms
+  for (const [turkish, english] of Object.entries(turkishTerms)) {
+    processedQuery = processedQuery.replace(new RegExp(turkish, "gi"), english);
+  }
+
+  // Add helpful context for SQL generation
+  if (processedQuery.toLowerCase().includes("camera")) {
+    processedQuery += " (query about camera devices and their data)";
+  } else if (processedQuery.toLowerCase().includes("temperature")) {
+    processedQuery += " (query about temperature sensor readings)";
+  } else if (processedQuery.toLowerCase().includes("sensor")) {
+    processedQuery += " (query about sensor devices and signals)";
+  }
+
+  return processedQuery;
+}
+
+// NL to SQL model - second stage LLM that converts processed intent to SQL
 async function generateText(prompt, opts = {}) {
   const bodyPayload = opts.payload || {
     prompt,
     max_length: Math.round(opts.max_length ?? 200),
   };
 
-  const res = await fetch(CUSTOM_LLM_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(bodyPayload),
-  });
+  console.log(
+    "Calling NL to SQL Model with:",
+    JSON.stringify(bodyPayload, null, 2)
+  );
 
-  const data = await res.json();
-  console.log("HTTP Provider Response:", JSON.stringify(data, null, 2));
+  const maxRetries = 3;
+  let lastError;
 
-  if (!res.ok) {
-    const errMsg = data?.error || data?.detail || res.statusText;
-    throw new Error(`HTTP provider error ${res.status}: ${errMsg}`);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`NL to SQL attempt ${attempt}/${maxRetries}`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      const res = await fetch(CUSTOM_LLM_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Connection: "keep-alive",
+        },
+        body: JSON.stringify(bodyPayload),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText };
+        }
+        const errMsg = errorData?.error || errorData?.detail || res.statusText;
+        throw new Error(`NL to SQL model HTTP ${res.status}: ${errMsg}`);
+      }
+
+      const data = await res.json();
+      console.log("NL to SQL Model Response:", JSON.stringify(data, null, 2));
+
+      const text =
+        data?.sql ||
+        data?.generated_text ||
+        data?.text ||
+        data?.response ||
+        data?.content ||
+        data?.output ||
+        data?.result ||
+        data?.answer ||
+        null;
+
+      console.log("Extracted SQL text:", text);
+
+      if (!text) {
+        console.log("Available NL to SQL data keys:", Object.keys(data));
+        throw new Error("Empty response from NL to SQL model");
+      }
+
+      return text;
+    } catch (error) {
+      lastError = error;
+      console.error(`NL to SQL attempt ${attempt} failed:`, error.message);
+
+      if (attempt < maxRetries) {
+        const waitTime = Math.pow(2, attempt - 1) * 1000; // Exponential backoff: 1s, 2s, 4s
+        console.log(`Waiting ${waitTime}ms before retry...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+    }
   }
 
-  const text =
-    data?.sql ||
-    data?.generated_text ||
-    data?.text ||
-    data?.response ||
-    data?.content ||
-    data?.output ||
-    data?.result ||
-    data?.answer ||
-    null;
-
-  console.log("Extracted text:", text);
-
-  if (!text) {
-    console.log("Available data keys:", Object.keys(data));
-    throw new Error("Empty response from HTTP provider");
-  }
-  return text;
+  throw new Error(
+    `NL to SQL model failed after ${maxRetries} attempts. Last error: ${lastError?.message}`
+  );
 }
 
 // MCP client helpers
@@ -184,11 +330,84 @@ const server = createServer(async (req, res) => {
       return sendJSON(res, 200, { result });
     }
 
+    if (method === "POST" && url.pathname === "/thinking") {
+      const body = (await parseBody(req)) || {};
+      const { message, max_tokens } = body;
+      if (!message || typeof message !== "string") {
+        return sendJSON(res, 400, { error: "'message' (string) is required" });
+      }
+
+      const isThinkingAvailable = await checkThinkingModel();
+
+      if (isThinkingAvailable) {
+        try {
+          const response = await callThinkingModel(message, { max_tokens });
+          return sendJSON(res, 200, {
+            originalMessage: message,
+            response: response,
+            stage: "thinking_only",
+            modelUsed: "thinking_model",
+          });
+        } catch (err) {
+          console.error("Thinking model error, using fallback:", err.message);
+          const fallbackResponse = processQueryWithoutThinking(message);
+          return sendJSON(res, 200, {
+            originalMessage: message,
+            response: fallbackResponse,
+            stage: "thinking_fallback",
+            modelUsed: "fallback_processing",
+            warning: "Thinking model not available, used fallback processing",
+          });
+        }
+      } else {
+        const fallbackResponse = processQueryWithoutThinking(message);
+        return sendJSON(res, 200, {
+          originalMessage: message,
+          response: fallbackResponse,
+          stage: "thinking_fallback",
+          modelUsed: "fallback_processing",
+          info: "Thinking model not available, used fallback processing",
+        });
+      }
+    }
+
     if (method === "POST" && url.pathname === "/nl") {
       const body = (await parseBody(req)) || {};
       const { query, customSchema } = body;
       if (!query || typeof query !== "string") {
         return sendJSON(res, 400, { error: "'query' (string) is required" });
+      }
+
+      console.log("=== Starting 2-Stage LLM Processing ===");
+      console.log("Original user query:", query);
+
+      // STAGE 1: Process user intent with thinking model or fallback
+      let processedQuery;
+      let thinkingStage = "pending";
+
+      const isThinkingAvailable = await checkThinkingModel();
+
+      if (isThinkingAvailable) {
+        try {
+          console.log("\n--- Stage 1: Thinking Model ---");
+          processedQuery = await callThinkingModel(query, { max_tokens: 300 });
+          console.log("Thinking model processed query:", processedQuery);
+          thinkingStage = "completed";
+        } catch (thinkingErr) {
+          console.error(
+            "Thinking model failed, using fallback:",
+            thinkingErr.message
+          );
+          processedQuery = processQueryWithoutThinking(query);
+          thinkingStage = "fallback";
+        }
+      } else {
+        console.log(
+          "\n--- Stage 1: Fallback Processing (No Thinking Model) ---"
+        );
+        processedQuery = processQueryWithoutThinking(query);
+        console.log("Fallback processed query:", processedQuery);
+        thinkingStage = "fallback";
       }
 
       // Use custom schema or fallback to static schema
@@ -262,14 +481,47 @@ CREATE TABLE device_permissions (
         `;
       }
 
-      // Generate SQL using AI
-      const rawResponse = await generateText("", {
-        payload: {
-          question: ` ${query}`,
-          schema: schema,
-        },
-        max_length: 500,
-      });
+      // STAGE 2: Convert processed query to SQL using NL to SQL model
+      let rawResponse;
+      try {
+        console.log("\n--- Stage 2: NL to SQL Model ---");
+
+        // Truncate very long schemas to prevent model overload
+        let truncatedSchema = schema;
+        if (schema.length > 4000) {
+          truncatedSchema =
+            schema.substring(0, 4000) +
+            "\n-- Schema truncated for model stability";
+          console.log("Schema truncated to prevent model overload");
+        }
+
+        rawResponse = await generateText("", {
+          payload: {
+            question: processedQuery,
+            schema: truncatedSchema,
+          },
+          max_length: 500,
+        });
+      } catch (sqlErr) {
+        console.error("NL to SQL model failed:", sqlErr.message);
+
+        // Check if it's a connection issue
+        const isConnectionError =
+          sqlErr.message.includes("fetch failed") ||
+          sqlErr.message.includes("timeout") ||
+          sqlErr.message.includes("ECONNREFUSED");
+
+        return sendJSON(res, 500, {
+          error: "NL to SQL model failed",
+          details: sqlErr.message,
+          stage: "nl_to_sql",
+          processedQuery: processedQuery,
+          isConnectionError: isConnectionError,
+          suggestion: isConnectionError
+            ? "Check if NL to SQL model server is running"
+            : "Model processing error",
+        });
+      }
 
       // Clean up SQL response
       let sql = (rawResponse || "").trim();
@@ -379,9 +631,22 @@ CREATE TABLE device_permissions (
         console.error("SQL execution failed:", execErr.message);
       }
 
+      console.log("\n=== Final Response ===");
+      console.log("Original query:", query);
+      console.log("Processed query:", processedQuery);
+      console.log("Generated SQL:", sql);
+      console.log("Execution result:", executionResult);
+
       return sendJSON(res, 200, {
+        originalQuery: query,
+        processedQuery: processedQuery,
         sql: sql,
         executionResult: executionResult,
+        stages: {
+          thinking: thinkingStage,
+          nlToSql: "completed",
+          sqlExecution: executionResult ? "completed" : "failed",
+        },
       });
     }
 

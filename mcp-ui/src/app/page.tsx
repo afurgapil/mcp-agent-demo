@@ -103,6 +103,18 @@ function formatCell(v: unknown): string {
   }
 }
 
+// Debug panel types
+type DebugInfo = {
+  originalQuery?: string;
+  processedQuery?: string;
+  thinkingModelInput?: Record<string, unknown>;
+  thinkingModelOutput?: string;
+  nlToSqlInput?: Record<string, unknown>;
+  nlToSqlOutput?: string;
+  stages?: Record<string, string>;
+  executionResult?: unknown;
+};
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [customSchema, setCustomSchema] = useState("");
@@ -120,6 +132,10 @@ export default function Home() {
   const finalResult = finalStep?.result;
   const [openPlan, setOpenPlan] = useState(true);
   const [openSteps, setOpenSteps] = useState(true);
+
+  // Debug panel state
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -153,6 +169,21 @@ export default function Home() {
       setExecSteps(Array.isArray(data.steps) ? data.steps : []);
       setSummary(data.summary ?? null);
       setRaw(data);
+
+      // Extract debug information from response
+      setDebugInfo({
+        originalQuery: data.originalQuery,
+        processedQuery: data.processedQuery,
+        thinkingModelInput: { message: query, max_tokens: 300 },
+        thinkingModelOutput: data.processedQuery,
+        nlToSqlInput: {
+          question: data.processedQuery,
+          schema: customSchema || "default schema",
+        },
+        nlToSqlOutput: data.sql,
+        stages: data.stages,
+        executionResult: data.executionResult,
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "İstek başarısız oldu");
     } finally {
@@ -171,6 +202,16 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setDebugMode(!debugMode)}
+              className={`text-xs px-3 h-8 inline-flex items-center rounded-lg transition-colors ${
+                debugMode
+                  ? "bg-blue-900/40 text-blue-300 border border-blue-700"
+                  : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+              }`}
+            >
+              🔍 Debug {debugMode ? "ON" : "OFF"}
+            </button>
             <span
               className={`text-xs px-3 h-8 inline-flex items-center rounded-lg ${
                 loading
@@ -341,6 +382,13 @@ CREATE TABLE students (
             </details>
           )}
         </div>
+
+        {/* Debug Panel */}
+        {debugMode && debugInfo && (
+          <div className="mt-6">
+            <DebugPanel debugInfo={debugInfo} />
+          </div>
+        )}
       </div>
       {loading && <LoadingOverlay />}
     </div>
@@ -701,6 +749,154 @@ function PlanRoadmap({ steps }: { steps: Step[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function DebugPanel({ debugInfo }: { debugInfo: DebugInfo | null }) {
+  const [activeTab, setActiveTab] = useState<
+    "thinking" | "nlToSql" | "stages" | "execution"
+  >("thinking");
+
+  if (!debugInfo) return null;
+
+  const tabs = [
+    { id: "thinking", label: "Thinking Model", icon: "🧠" },
+    { id: "nlToSql", label: "NL to SQL", icon: "🔄" },
+    { id: "stages", label: "Stages", icon: "📊" },
+    { id: "execution", label: "Execution", icon: "⚡" },
+  ] as const;
+
+  return (
+    <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg">🔍</span>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          AI Debug Panel
+        </h3>
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="flex flex-wrap gap-1 mb-4 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === tab.id
+                ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
+                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+            }`}
+          >
+            <span className="mr-1">{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="space-y-4">
+        {activeTab === "thinking" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                📥 Input (User Query)
+              </h4>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
+                  {debugInfo.originalQuery || "N/A"}
+                </pre>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                📤 Output (Processed)
+              </h4>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
+                  {debugInfo.processedQuery || "N/A"}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "nlToSql" && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                📥 Input (Processed Query)
+              </h4>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
+                  {debugInfo.processedQuery || "N/A"}
+                </pre>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                📤 Output (Generated SQL)
+              </h4>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
+                  {debugInfo.nlToSqlOutput || "N/A"}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "stages" && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+              🔄 Processing Stages
+            </h4>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+              {debugInfo.stages ? (
+                <div className="space-y-2">
+                  {Object.entries(debugInfo.stages).map(([stage, status]) => (
+                    <div key={stage} className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-20">
+                        {stage}:
+                      </span>
+                      <span
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          status === "completed"
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                            : status === "fallback"
+                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                            : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                        }`}
+                      >
+                        {status as string}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-xs text-gray-500">
+                  No stage information
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "execution" && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+              ⚡ SQL Execution Result
+            </h4>
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
+              <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300 max-h-96 overflow-auto">
+                {debugInfo.executionResult
+                  ? JSON.stringify(debugInfo.executionResult, null, 2)
+                  : "No execution result"}
+              </pre>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
