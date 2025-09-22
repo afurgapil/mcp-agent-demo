@@ -250,7 +250,7 @@ CREATE TABLE students (
           />
         ) : null}
 
-        <div className="mt-6 grid grid-cols-1  gap-4">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           {error && (
             <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
               Error: {error}

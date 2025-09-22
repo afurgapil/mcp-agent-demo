@@ -5,7 +5,7 @@ import { URL } from "url";
 const {
   MCP_TOOLBOX_URL,
   PORT = 3001,
-  CUSTOM_LLM_URL = "http://192.168.1.113:8000/generate",
+  CUSTOM_LLM_URL = "http://192.168.1.113:8000/api/generate",
 } = process.env;
 
 if (!MCP_TOOLBOX_URL) {
@@ -197,25 +197,69 @@ const server = createServer(async (req, res) => {
         schema = customSchema;
       } else {
         // Static fallback schema
-        schema = `CREATE TABLE students (
-  student_id INT PRIMARY KEY,
-  name VARCHAR(255),
-  major VARCHAR(255)
+        schema = `
+        -- Table for all devices
+CREATE TABLE devices (
+    device_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    type ENUM('camera', 'sensor', 'gateway', 'other') NOT NULL,
+    location VARCHAR(255),
+    status ENUM('active', 'inactive', 'maintenance') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE courses (
-  course_id INT PRIMARY KEY,
-  name VARCHAR(255),
-  credits INT
+-- Specific table for cameras (extends devices)
+CREATE TABLE cameras (
+    camera_id INT AUTO_INCREMENT PRIMARY KEY,
+    device_id INT NOT NULL,
+    resolution VARCHAR(50), -- e.g. "1920x1080"
+    fps INT,                -- frames per second
+    ip_address VARCHAR(100),
+    angle_of_view DECIMAL(5,2), -- degrees
+    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
 );
 
-CREATE TABLE enrollments (
-  enrollment_id INT PRIMARY KEY,
-  student_id INT,
-  course_id INT,
-  FOREIGN KEY (student_id) REFERENCES students(student_id),
-  FOREIGN KEY (course_id) REFERENCES courses(course_id)
-);`;
+-- Signals table (raw or processed signals from devices)
+CREATE TABLE signals (
+    signal_id INT AUTO_INCREMENT PRIMARY KEY,
+    device_id INT NOT NULL,
+    signal_type ENUM('temperature', 'motion', 'video', 'audio', 'other') NOT NULL,
+    value VARCHAR(255),  -- can store raw data or references
+    unit VARCHAR(50),    -- e.g. °C, dB, JSON
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+);
+
+-- Historical logs for signals
+CREATE TABLE signal_logs (
+    log_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    signal_id INT NOT NULL,
+    value VARCHAR(255),
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (signal_id) REFERENCES signals(signal_id) ON DELETE CASCADE
+);
+
+-- Users who manage devices
+CREATE TABLE users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(100) UNIQUE NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    role ENUM('admin', 'operator', 'viewer') DEFAULT 'viewer',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Permissions for devices (user-device mapping)
+CREATE TABLE device_permissions (
+    permission_id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    device_id INT NOT NULL,
+    can_view BOOLEAN DEFAULT TRUE,
+    can_control BOOLEAN DEFAULT FALSE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+);
+
+        `;
       }
 
       // Generate SQL using AI
