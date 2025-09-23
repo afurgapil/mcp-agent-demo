@@ -137,6 +137,75 @@ export default function Home() {
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
 
+  // Configuration state
+  const [activeTab, setActiveTab] = useState<"query" | "config">("query");
+  const [config, setConfig] = useState<{
+    system_prompt: string;
+    schema: string;
+  } | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+
+  // Load configuration on component mount
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  async function loadConfig() {
+    setConfigLoading(true);
+    setConfigError(null);
+    try {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setConfig(data);
+      } else {
+        throw new Error("Configuration yüklenemedi");
+      }
+    } catch (err: unknown) {
+      setConfigError(
+        err instanceof Error ? err.message : "Configuration yükleme hatası"
+      );
+    } finally {
+      setConfigLoading(false);
+    }
+  }
+
+  async function saveConfig(newConfig: {
+    system_prompt?: string;
+    schema?: string;
+  }) {
+    setConfigLoading(true);
+    setConfigError(null);
+    try {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newConfig),
+      });
+
+      if (res.ok) {
+        // Reload config to get updated values
+        await loadConfig();
+        return true;
+      } else {
+        const errorData = await res.json();
+        throw new Error(
+          errorData?.detail?.[0]?.msg || "Configuration kaydetme hatası"
+        );
+      }
+    } catch (err: unknown) {
+      setConfigError(
+        err instanceof Error ? err.message : "Configuration kaydetme hatası"
+      );
+      return false;
+    } finally {
+      setConfigLoading(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
@@ -194,197 +263,249 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-5xl mx-auto p-6">
-        <header className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">MCP UI</h1>
-            <p className="text-sm text-gray-400">
-              From natural language to MCP Toolbox tools
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setDebugMode(!debugMode)}
-              className={`text-xs px-3 h-8 inline-flex items-center rounded-lg transition-colors ${
-                debugMode
-                  ? "bg-blue-900/40 text-blue-300 border border-blue-700"
-                  : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-              }`}
-            >
-              🔍 Debug {debugMode ? "ON" : "OFF"}
-            </button>
-            <span
-              className={`text-xs px-3 h-8 inline-flex items-center rounded-lg ${
-                loading
-                  ? "bg-amber-900/40 text-amber-300"
+        <header className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">MCP UI</h1>
+              <p className="text-sm text-gray-400">
+                From natural language to MCP Toolbox tools
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setDebugMode(!debugMode)}
+                className={`text-xs px-3 h-8 inline-flex items-center rounded-lg transition-colors ${
+                  debugMode
+                    ? "bg-blue-900/40 text-blue-300 border border-blue-700"
+                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                }`}
+              >
+                🔍 Debug {debugMode ? "ON" : "OFF"}
+              </button>
+              <span
+                className={`text-xs px-3 h-8 inline-flex items-center rounded-lg ${
+                  loading || configLoading
+                    ? "bg-amber-900/40 text-amber-300"
+                    : hasResults
+                    ? "bg-emerald-900/40 text-emerald-300"
+                    : "bg-zinc-800 text-zinc-300"
+                }`}
+              >
+                {loading || configLoading
+                  ? "Çalışıyor"
                   : hasResults
-                  ? "bg-emerald-900/40 text-emerald-300"
-                  : "bg-zinc-800 text-zinc-300"
+                  ? "Hazır"
+                  : "Boşta"}
+              </span>
+            </div>
+          </div>
+
+          {/* Tab Navigation */}
+          <div className="flex gap-1 bg-zinc-900 rounded-lg p-1">
+            <button
+              onClick={() => setActiveTab("query")}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === "query"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800"
               }`}
             >
-              {loading ? "Çalışıyor" : hasResults ? "Hazır" : "Boşta"}
-            </span>
+              📝 SQL Sorgu
+            </button>
+            <button
+              onClick={() => setActiveTab("config")}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === "config"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800"
+              }`}
+            >
+              ⚙️ Konfigürasyon
+            </button>
           </div>
         </header>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium mb-1 text-zinc-100">
-                Sorgu
-              </label>
-              <textarea
-                className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm"
-                placeholder={"örn., students tablosuna 10 satır ekle"}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1 text-zinc-100">
-                Veritabanı Şeması (Opsiyonel)
-              </label>
-              <textarea
-                className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
-                placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
+        {/* Query Tab Content */}
+        {activeTab === "query" && (
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium mb-1 text-zinc-100">
+                  Sorgu
+                </label>
+                <textarea
+                  className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm"
+                  placeholder={
+                    "örn., Son 30 gün içinde alışveriş yapan müşteriler kimler?"
+                  }
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-zinc-100">
+                  Veritabanı Şeması (Opsiyonel)
+                </label>
+                <textarea
+                  className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
+                  placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
 
 CREATE TABLE students (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT
 );`}
-                value={customSchema}
-                onChange={(e) => setCustomSchema(e.target.value)}
-              />
+                  value={customSchema}
+                  onChange={(e) => setCustomSchema(e.target.value)}
+                />
+              </div>
             </div>
-          </div>
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110"
-              disabled={loading || !query.trim()}
-            >
-              {loading ? "Gönderiliyor..." : "Gönder"}
-            </button>
-            <button
-              type="button"
-              className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-              onClick={() => {
-                setQuery("");
-                setCustomSchema("");
-                setError(null);
-                setPlan(null);
-                setSummary(null);
-                setRaw(null);
-                setExecSteps([]);
-              }}
-            >
-              Temizle
-            </button>
-          </div>
-        </form>
+            <div className="flex gap-3">
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110"
+                disabled={loading || !query.trim()}
+              >
+                {loading ? "Gönderiliyor..." : "Gönder"}
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
+                onClick={() => {
+                  setQuery("");
+                  setCustomSchema("");
+                  setError(null);
+                  setPlan(null);
+                  setSummary(null);
+                  setRaw(null);
+                  setExecSteps([]);
+                }}
+              >
+                Temizle
+              </button>
+            </div>
+          </form>
+        )}
 
-        {/* Primary Result right under input */}
-        {finalResult ? (
+        {/* Configuration Tab Content */}
+        {activeTab === "config" && (
+          <ConfigurationPanel
+            config={config}
+            loading={configLoading}
+            error={configError}
+            onSave={saveConfig}
+          />
+        )}
+
+        {/* Primary Result right under input - only show on query tab */}
+        {activeTab === "query" && finalResult ? (
           <ResultCard
             result={finalResult as Record<string, unknown>}
             loading={loading}
           />
         ) : null}
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {error && (
-            <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
-              Error: {error}
-            </div>
-          )}
-          {false && (
-            <div className="rounded-xl w-full border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-              <header className="flex items-center justify-between px-4 py-3">
-                <h2 className="font-medium">Plan</h2>
-                <button
-                  onClick={() => setOpenPlan((v) => !v)}
-                  className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
-                >
-                  {openPlan ? "Gizle" : "Göster"}
-                </button>
-              </header>
-              {openPlan && (
-                <div className="px-4 pb-4">
-                  {Array.isArray(plan?.steps) && plan!.steps!.length > 0 ? (
-                    <PlanRoadmap steps={plan!.steps as Step[]} />
-                  ) : (
-                    <div className="rounded bg-gray-50 dark:bg-gray-900 p-2 text-sm">
-                      Tek adımlı plan
-                    </div>
-                  )}
-                  {plan?.rationale && (
-                    <div className="mt-3 text-sm">
-                      <span className="font-semibold">Gerekçe: </span>
-                      {plan?.rationale}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {false && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-              <header className="flex items-center justify-between px-4 py-3">
-                <h2 className="font-medium">Adımlar</h2>
-                <button
-                  onClick={() => setOpenSteps((v) => !v)}
-                  className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
-                >
-                  {openSteps ? "Gizle" : "Göster"}
-                </button>
-              </header>
-              {openSteps && <StepTimeline steps={execSteps} />}
-            </div>
-          )}
-          {false && (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-              <h2 className="font-medium mb-2">Özet</h2>
-              <p className="text-sm whitespace-pre-wrap">{summary}</p>
-            </div>
-          )}
-          {/* AI Raw Response */}
-          {raw && (raw as Record<string, unknown>).sql ? (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-              <h3 className="text-sm font-medium mb-2">
-                AI&apos;dan Gelen Response
-              </h3>
-              <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
-                {String((raw as Record<string, unknown>).sql)}
-              </pre>
-            </div>
-          ) : null}
-
-          {/* SQL Execution Result */}
-          {raw && (raw as Record<string, unknown>).executionResult ? (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-              <h3 className="text-sm font-medium mb-2">SQL Execution Result</h3>
-              <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
-                {JSON.stringify(
-                  (raw as Record<string, unknown>).executionResult,
-                  null,
-                  2
+        {/* Results section - only show on query tab */}
+        {activeTab === "query" && (
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {error && (
+              <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
+                Error: {error}
+              </div>
+            )}
+            {false && (
+              <div className="rounded-xl w-full border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
+                <header className="flex items-center justify-between px-4 py-3">
+                  <h2 className="font-medium">Plan</h2>
+                  <button
+                    onClick={() => setOpenPlan((v) => !v)}
+                    className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
+                  >
+                    {openPlan ? "Gizle" : "Göster"}
+                  </button>
+                </header>
+                {openPlan && (
+                  <div className="px-4 pb-4">
+                    {Array.isArray(plan?.steps) && plan!.steps!.length > 0 ? (
+                      <PlanRoadmap steps={plan!.steps as Step[]} />
+                    ) : (
+                      <div className="rounded bg-gray-50 dark:bg-gray-900 p-2 text-sm">
+                        Tek adımlı plan
+                      </div>
+                    )}
+                    {plan?.rationale && (
+                      <div className="mt-3 text-sm">
+                        <span className="font-semibold">Gerekçe: </span>
+                        {plan?.rationale}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </pre>
-            </div>
-          ) : null}
+              </div>
+            )}
+            {false && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
+                <header className="flex items-center justify-between px-4 py-3">
+                  <h2 className="font-medium">Adımlar</h2>
+                  <button
+                    onClick={() => setOpenSteps((v) => !v)}
+                    className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
+                  >
+                    {openSteps ? "Gizle" : "Göster"}
+                  </button>
+                </header>
+                {openSteps && <StepTimeline steps={execSteps} />}
+              </div>
+            )}
+            {false && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
+                <h2 className="font-medium mb-2">Özet</h2>
+                <p className="text-sm whitespace-pre-wrap">{summary}</p>
+              </div>
+            )}
+            {/* AI Raw Response */}
+            {raw && (raw as Record<string, unknown>).sql ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
+                <h3 className="text-sm font-medium mb-2">
+                  AI&apos;dan Gelen Response
+                </h3>
+                <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
+                  {String((raw as Record<string, unknown>).sql)}
+                </pre>
+              </div>
+            ) : null}
 
-          {raw != null && (
-            <details className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-              <summary className="cursor-pointer text-sm">Raw Response</summary>
-              <pre className="mt-2 bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
-                {JSON.stringify(raw, null, 2)}
-              </pre>
-            </details>
-          )}
-        </div>
+            {/* SQL Execution Result */}
+            {raw && (raw as Record<string, unknown>).executionResult ? (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
+                <h3 className="text-sm font-medium mb-2">
+                  SQL Execution Result
+                </h3>
+                <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
+                  {JSON.stringify(
+                    (raw as Record<string, unknown>).executionResult,
+                    null,
+                    2
+                  )}
+                </pre>
+              </div>
+            ) : null}
 
-        {/* Debug Panel */}
-        {debugMode && debugInfo && (
+            {raw != null && (
+              <details className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
+                <summary className="cursor-pointer text-sm">
+                  Raw Response
+                </summary>
+                <pre className="mt-2 bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
+                  {JSON.stringify(raw, null, 2)}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Debug Panel - only show on query tab */}
+        {activeTab === "query" && debugMode && debugInfo && (
           <div className="mt-6">
             <DebugPanel debugInfo={debugInfo} />
           </div>
@@ -895,6 +1016,147 @@ function DebugPanel({ debugInfo }: { debugInfo: DebugInfo | null }) {
               </pre>
             </div>
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConfigurationPanel({
+  config,
+  loading,
+  error,
+  onSave,
+}: {
+  config: { system_prompt: string; schema: string } | null;
+  loading: boolean;
+  error: string | null;
+  onSave: (config: {
+    system_prompt?: string;
+    schema?: string;
+  }) => Promise<boolean>;
+}) {
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [schema, setSchema] = useState("");
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Update local state when config loads
+  useEffect(() => {
+    if (config) {
+      setSystemPrompt(config.system_prompt);
+      setSchema(config.schema);
+      setHasChanges(false);
+    }
+  }, [config]);
+
+  // Track changes
+  useEffect(() => {
+    if (config) {
+      const changed =
+        systemPrompt !== config.system_prompt || schema !== config.schema;
+      setHasChanges(changed);
+    }
+  }, [systemPrompt, schema, config]);
+
+  const handleSave = async () => {
+    if (!config) return;
+
+    const updates: { system_prompt?: string; schema?: string } = {};
+    if (systemPrompt !== config.system_prompt)
+      updates.system_prompt = systemPrompt;
+    if (schema !== config.schema) updates.schema = schema;
+
+    if (Object.keys(updates).length > 0) {
+      const success = await onSave(updates);
+      if (success) {
+        setHasChanges(false);
+      }
+    }
+  };
+
+  const handleReset = () => {
+    if (config) {
+      setSystemPrompt(config.system_prompt);
+      setSchema(config.schema);
+      setHasChanges(false);
+    }
+  };
+
+  if (loading && !config) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-zinc-400">Configuration yükleniyor...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm">
+          Hata: {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-6">
+        {/* System Prompt */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-zinc-100">
+            System Prompt
+          </label>
+          <textarea
+            className="w-full h-48 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
+            placeholder="AI asistanı için sistem talimatları girin..."
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            disabled={loading}
+          />
+          <p className="text-xs text-zinc-400 mt-1">
+            AI modeline verilen sistem talimatları. SQL sorgusu oluştururken bu
+            kurallara uyar.
+          </p>
+        </div>
+
+        {/* Database Schema */}
+        <div>
+          <label className="block text-sm font-medium mb-2 text-zinc-100">
+            Veritabanı Şeması
+          </label>
+          <textarea
+            className="w-full h-64 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
+            placeholder="CREATE TABLE statements ve database schema..."
+            value={schema}
+            onChange={(e) => setSchema(e.target.value)}
+            disabled={loading}
+          />
+          <p className="text-xs text-zinc-400 mt-1">
+            Varsayılan veritabanı şeması. AI bu şemayı kullanarak SQL sorguları
+            oluşturur.
+          </p>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex gap-3 pt-4 border-t border-zinc-800">
+        <button
+          onClick={handleSave}
+          className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110 transition"
+          disabled={loading || !hasChanges}
+        >
+          {loading ? "Kaydediliyor..." : "Kaydet"}
+        </button>
+        <button
+          onClick={handleReset}
+          className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 transition"
+          disabled={loading || !hasChanges}
+        >
+          Sıfırla
+        </button>
+        <div className="flex-1" />
+        {hasChanges && (
+          <span className="text-xs text-amber-400 self-center">
+            Kaydedilmemiş değişiklikler var
+          </span>
         )}
       </div>
     </div>
