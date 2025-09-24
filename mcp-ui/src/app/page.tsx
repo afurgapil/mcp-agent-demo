@@ -113,6 +113,29 @@ type DebugInfo = {
   nlToSqlOutput?: string;
   stages?: Record<string, string>;
   executionResult?: unknown;
+  // New debug fields from backend
+  debug?: {
+    mode: string;
+    request: {
+      endpoint: string;
+      query: string;
+      timestamp: string;
+    };
+    aiCalls: Array<{
+      modelName: string;
+      input: unknown;
+      output: unknown;
+      duration: number;
+      timestamp: string;
+      metadata: Record<string, unknown>;
+    }>;
+    stages: Array<{
+      stage: string;
+      timestamp: string;
+      data: unknown;
+    }>;
+    totalDuration: number;
+  };
 };
 
 export default function Home() {
@@ -134,11 +157,45 @@ export default function Home() {
   const [openSteps, setOpenSteps] = useState(true);
 
   // Debug panel state
-  const [debugMode, setDebugMode] = useState(false);
+  const [debugMode, setDebugMode] = useState(true);
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
 
+  // Check debug mode status on mount
+  useEffect(() => {
+    const checkDebugMode = async () => {
+      try {
+        const res = await fetch(`${API_BASE.replace(/\/$/, "")}/debug/status`);
+        if (res.ok) {
+          const data = await res.json();
+          setDebugMode(data.debugMode || false);
+        }
+      } catch (err) {
+        console.warn("Could not check debug mode status:", err);
+      }
+    };
+    checkDebugMode();
+  }, []);
+
+  // Toggle debug mode on backend
+  const toggleDebugMode = async () => {
+    try {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/debug/toggle`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDebugMode(data.debugMode);
+        console.log(`Debug mode ${data.debugMode ? "enabled" : "disabled"}`);
+      }
+    } catch (err) {
+      console.error("Failed to toggle debug mode:", err);
+    }
+  };
+
   // Configuration state
-  const [activeTab, setActiveTab] = useState<"query" | "config">("query");
+  const [activeTab, setActiveTab] = useState<"query" | "config" | "tools">(
+    "query"
+  );
   const [config, setConfig] = useState<{
     system_prompt: string;
     schema: string;
@@ -146,28 +203,183 @@ export default function Home() {
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  // Load configuration on component mount
+  // Tools state
+  const [tools, setTools] = useState<
+    Array<{
+      name: string;
+      description?: string;
+      inputSchema?: {
+        type: string;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+    }>
+  >([]);
+  const [toolsLoading, setToolsLoading] = useState(false);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [toolParams, setToolParams] = useState<Record<string, unknown>>({});
+  const [toolExecuting, setToolExecuting] = useState(false);
+  const [toolResult, setToolResult] = useState<unknown>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set(["Database Query", "Database Management"])
+  );
+
+  // Tool categorization function
+  const categorizeTools = (
+    toolsList: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: {
+        type: string;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+    }>
+  ) => {
+    const categories: Record<string, typeof toolsList> = {};
+
+    toolsList.forEach((tool: (typeof toolsList)[0]) => {
+      let category = "Other";
+
+      // Categorize based on tool name and description
+      if (
+        tool.name.includes("show_tables") ||
+        tool.name.includes("describe_table")
+      ) {
+        category = "Database Schema";
+      } else if (
+        tool.name.includes("list_table") ||
+        tool.name.includes("select") ||
+        tool.description?.toLowerCase().includes("select")
+      ) {
+        category = "Database Query";
+      } else if (
+        tool.name.includes("execute_sql") ||
+        tool.name.includes("mysql_execute")
+      ) {
+        category = "Database Management";
+      } else if (
+        tool.name.includes("insert") ||
+        tool.description?.toLowerCase().includes("insert")
+      ) {
+        category = "Data Insert";
+      } else if (
+        tool.name.includes("update") ||
+        tool.description?.toLowerCase().includes("update")
+      ) {
+        category = "Data Update";
+      } else if (
+        tool.name.includes("delete") ||
+        tool.description?.toLowerCase().includes("delete")
+      ) {
+        category = "Data Delete";
+      } else if (
+        tool.name.includes("create") ||
+        tool.name.includes("drop") ||
+        tool.name.includes("alter")
+      ) {
+        category = "Schema Management";
+      }
+
+      if (!categories[category]) {
+        categories[category] = [];
+      }
+      categories[category].push(tool);
+    });
+
+    return categories;
+  };
+
+  const toggleCategory = (category: string) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(category)) {
+      newExpanded.delete(category);
+    } else {
+      newExpanded.add(category);
+    }
+    setExpandedCategories(newExpanded);
+  };
+
+  // Load configuration and tools on component mount
   useEffect(() => {
     loadConfig();
+    loadTools();
   }, []);
 
   async function loadConfig() {
     setConfigLoading(true);
     setConfigError(null);
     try {
+      // Fetch config via backend (which proxies to external LLM service)
       const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`);
       if (res.ok) {
         const data = await res.json();
         setConfig(data);
       } else {
-        throw new Error("Configuration yüklenemedi");
+        // If config fetch fails, don't show error - just silently fail
+        console.warn("Configuration service unavailable");
+        setConfig(null);
       }
     } catch (err: unknown) {
-      setConfigError(
-        err instanceof Error ? err.message : "Configuration yükleme hatası"
-      );
+      // If config fetch fails, don't show error - just silently fail
+      console.warn("Configuration fetch failed:", err);
+      setConfig(null);
     } finally {
       setConfigLoading(false);
+    }
+  }
+
+  async function loadTools() {
+    setToolsLoading(true);
+    setToolsError(null);
+    try {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/tools`);
+      if (res.ok) {
+        const data = await res.json();
+        setTools(data.tools || []);
+      } else {
+        console.warn("Tools service unavailable");
+        setTools([]);
+      }
+    } catch (err: unknown) {
+      console.warn("Tools fetch failed:", err);
+      setTools([]);
+    } finally {
+      setToolsLoading(false);
+    }
+  }
+
+  async function executeTool(toolName: string, args: Record<string, unknown>) {
+    setToolExecuting(true);
+    setToolsError(null);
+    try {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/tool`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: toolName,
+          args: args,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setToolResult(data.result);
+        return data.result;
+      } else {
+        const errorData = await res.json();
+        throw new Error(errorData?.error || "Tool execution failed");
+      }
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error ? err.message : "Tool execution failed";
+      setToolsError(errorMessage);
+      throw err;
+    } finally {
+      setToolExecuting(false);
     }
   }
 
@@ -178,6 +390,7 @@ export default function Home() {
     setConfigLoading(true);
     setConfigError(null);
     try {
+      // Save config via backend (which proxies to external LLM service)
       const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`, {
         method: "PUT",
         headers: {
@@ -239,152 +452,236 @@ export default function Home() {
       setSummary(data.summary ?? null);
       setRaw(data);
 
-      // Extract debug information from response
-      setDebugInfo({
-        originalQuery: data.originalQuery,
-        processedQuery: data.processedQuery,
+      // Extract debug information from response - ensure all data exists
+      const debugData: DebugInfo = {
+        originalQuery: data.originalQuery || query,
+        processedQuery: data.processedQuery || query,
         thinkingModelInput: { message: query, max_tokens: 300 },
-        thinkingModelOutput: data.processedQuery,
+        thinkingModelOutput: data.processedQuery || query,
         nlToSqlInput: {
-          question: data.processedQuery,
+          question: data.processedQuery || query,
           schema: customSchema || "default schema",
         },
-        nlToSqlOutput: data.sql,
-        stages: data.stages,
+        nlToSqlOutput: data.sql || "No SQL generated",
+        stages: data.stages || {},
         executionResult: data.executionResult,
-      });
+        debug: data.debug || null, // Backend debug info
+      };
+
+      // Only set debug info if we have meaningful data
+      if (data.debug || data.originalQuery || data.processedQuery || data.sql) {
+        setDebugInfo(debugData);
+      } else {
+        setDebugInfo(null);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "İstek başarısız oldu");
+      const errorMessage =
+        err instanceof Error ? err.message : "İstek başarısız oldu";
+
+      // Handle specific configuration service errors more gracefully
+      if (
+        err instanceof Error &&
+        err.message.includes("Configuration service")
+      ) {
+        setError(
+          "Sistem konfigürasyonu şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin."
+        );
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="max-w-5xl mx-auto p-6">
-        <header className="mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">MCP UI</h1>
-              <p className="text-sm text-gray-400">
-                From natural language to MCP Toolbox tools
-              </p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-black to-zinc-900 text-white">
+      {/* Background decoration */}
+      <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iNCIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
+
+      <div className="relative max-w-6xl mx-auto p-6">
+        <header className="mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                  <span className="text-xl font-bold">M</span>
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+                    MCP Workspace
+                  </h1>
+                  <p className="text-sm text-gray-400">
+                    🚀 Natural language to MCP Toolbox tools
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setDebugMode(!debugMode)}
-                className={`text-xs px-3 h-8 inline-flex items-center rounded-lg transition-colors ${
+                onClick={toggleDebugMode}
+                className={`text-xs px-4 py-2 inline-flex items-center rounded-xl transition-all duration-300 transform hover:scale-105 ${
                   debugMode
-                    ? "bg-blue-900/40 text-blue-300 border border-blue-700"
-                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    ? "bg-gradient-to-r from-blue-500/20 to-blue-600/20 text-blue-300 border border-blue-500/30 shadow-lg shadow-blue-500/20"
+                    : "bg-zinc-800/50 backdrop-blur-sm text-zinc-300 hover:bg-zinc-700/50 border border-zinc-700/50"
                 }`}
               >
                 🔍 Debug {debugMode ? "ON" : "OFF"}
               </button>
-              <span
-                className={`text-xs px-3 h-8 inline-flex items-center rounded-lg ${
+              <div
+                className={`text-xs px-4 py-2 inline-flex items-center rounded-xl border backdrop-blur-sm ${
                   loading || configLoading
-                    ? "bg-amber-900/40 text-amber-300"
+                    ? "bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border-amber-500/30 shadow-lg shadow-amber-500/20"
                     : hasResults
-                    ? "bg-emerald-900/40 text-emerald-300"
-                    : "bg-zinc-800 text-zinc-300"
+                    ? "bg-gradient-to-r from-emerald-500/20 to-green-500/20 text-emerald-300 border-emerald-500/30 shadow-lg shadow-emerald-500/20"
+                    : "bg-zinc-800/50 text-zinc-300 border-zinc-700/50"
                 }`}
               >
+                {loading ||
+                  (configLoading && (
+                    <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                  ))}
                 {loading || configLoading
                   ? "Çalışıyor"
                   : hasResults
-                  ? "Hazır"
-                  : "Boşta"}
-              </span>
+                  ? "✅ Hazır"
+                  : "⚫ Boşta"}
+              </div>
             </div>
           </div>
 
           {/* Tab Navigation */}
-          <div className="flex gap-1 bg-zinc-900 rounded-lg p-1">
+          <div className="flex gap-2 bg-zinc-900/50 backdrop-blur-xl rounded-2xl p-2 border border-zinc-800/50 shadow-2xl">
             <button
               onClick={() => setActiveTab("query")}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 ${
                 activeTab === "query"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-300 hover:text-white hover:bg-zinc-800"
+                  ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800/50 border border-transparent hover:border-zinc-700/50"
               }`}
             >
-              📝 SQL Sorgu
+              <span className="flex items-center gap-2">
+                📝 <span>SQL Sorgu</span>
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("tools")}
+              className={`px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 ${
+                activeTab === "tools"
+                  ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/25"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800/50 border border-transparent hover:border-zinc-700/50"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                🔧 <span>Araçlar</span>
+              </span>
             </button>
             <button
               onClick={() => setActiveTab("config")}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`px-6 py-3 rounded-xl text-sm font-medium transition-all duration-300 transform hover:scale-105 ${
                 activeTab === "config"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-300 hover:text-white hover:bg-zinc-800"
+                  ? "bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-lg shadow-orange-500/25"
+                  : "text-zinc-300 hover:text-white hover:bg-zinc-800/50 border border-transparent hover:border-zinc-700/50"
               }`}
             >
-              ⚙️ Konfigürasyon
+              <span className="flex items-center gap-2">
+                ⚙️ <span>Konfigürasyon</span>
+              </span>
             </button>
           </div>
         </header>
 
         {/* Query Tab Content */}
         {activeTab === "query" && (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1 text-zinc-100">
-                  Sorgu
-                </label>
-                <textarea
-                  className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm"
-                  placeholder={
-                    "örn., Son 30 gün içinde alışveriş yapan müşteriler kimler?"
-                  }
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1 text-zinc-100">
-                  Veritabanı Şeması (Opsiyonel)
-                </label>
-                <textarea
-                  className="w-full h-32 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
-                  placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
+          <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold mb-2 text-zinc-100 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
+                    Sorgu
+                  </label>
+                  <textarea
+                    className="w-full h-36 rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 shadow-xl transition-all duration-300"
+                    placeholder="örn., Son 30 gün içinde alışveriş yapan müşteriler kimler?"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold mb-2 text-zinc-100 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
+                    Veritabanı Şeması (Opsiyonel)
+                  </label>
+                  <textarea
+                    className="w-full h-36 rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 shadow-xl font-mono transition-all duration-300"
+                    placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
 
 CREATE TABLE students (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT
 );`}
-                  value={customSchema}
-                  onChange={(e) => setCustomSchema(e.target.value)}
-                />
+                    value={customSchema}
+                    onChange={(e) => setCustomSchema(e.target.value)}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110"
-                disabled={loading || !query.trim()}
-              >
-                {loading ? "Gönderiliyor..." : "Gönder"}
-              </button>
-              <button
-                type="button"
-                className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900"
-                onClick={() => {
-                  setQuery("");
-                  setCustomSchema("");
-                  setError(null);
-                  setPlan(null);
-                  setSummary(null);
-                  setRaw(null);
-                  setExecSteps([]);
-                }}
-              >
-                Temizle
-              </button>
-            </div>
-          </form>
+              <div className="flex gap-4 pt-2">
+                <button
+                  type="submit"
+                  className="px-8 py-3 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 text-white text-sm font-medium disabled:opacity-60 shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300 transform disabled:hover:scale-100"
+                  disabled={loading || !query.trim()}
+                >
+                  <span className="flex items-center gap-2">
+                    {loading ? (
+                      <>
+                        <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin"></div>
+                        Gönderiliyor...
+                      </>
+                    ) : (
+                      <>Gönder</>
+                    )}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="px-8 py-3 rounded-2xl border border-zinc-600/50 text-sm font-medium hover:bg-zinc-800/50 backdrop-blur-sm transition-all duration-300 transform hover:scale-105 text-zinc-300 hover:text-white"
+                  onClick={() => {
+                    setQuery("");
+                    setCustomSchema("");
+                    setError(null);
+                    setPlan(null);
+                    setSummary(null);
+                    setRaw(null);
+                    setExecSteps([]);
+                  }}
+                >
+                  <span className="flex items-center gap-2"> Temizle</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* Tools Tab Content */}
+        {activeTab === "tools" && (
+          <ToolsPanel
+            tools={tools}
+            loading={toolsLoading}
+            error={toolsError}
+            selectedTool={selectedTool}
+            onSelectTool={setSelectedTool}
+            toolParams={toolParams}
+            onUpdateParams={setToolParams}
+            executing={toolExecuting}
+            result={toolResult}
+            onExecute={executeTool}
+            onRefresh={loadTools}
+            categorizeTools={categorizeTools}
+            expandedCategories={expandedCategories}
+            onToggleCategory={toggleCategory}
+          />
         )}
 
         {/* Configuration Tab Content */}
@@ -507,7 +804,10 @@ CREATE TABLE students (
         {/* Debug Panel - only show on query tab */}
         {activeTab === "query" && debugMode && debugInfo && (
           <div className="mt-6">
-            <DebugPanel debugInfo={debugInfo} />
+            <DebugPanel
+              debugInfo={debugInfo}
+              onClearDebug={() => setDebugInfo(null)}
+            />
           </div>
         )}
       </div>
@@ -874,146 +1174,371 @@ function PlanRoadmap({ steps }: { steps: Step[] }) {
   );
 }
 
-function DebugPanel({ debugInfo }: { debugInfo: DebugInfo | null }) {
+function DebugPanel({
+  debugInfo,
+  onClearDebug,
+}: {
+  debugInfo: DebugInfo | null;
+  onClearDebug?: () => void;
+}) {
   const [activeTab, setActiveTab] = useState<
-    "thinking" | "nlToSql" | "stages" | "execution"
-  >("thinking");
+    "aiCalls" | "stages" | "timeline" | "raw"
+  >("aiCalls");
 
-  if (!debugInfo) return null;
+  if (!debugInfo) {
+    return (
+      <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-4">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg">🔍</span>
+          <h3 className="text-lg font-semibold text-zinc-100">
+            AI Debug Panel
+          </h3>
+        </div>
+        <div className="text-zinc-400 text-sm bg-zinc-800/50 rounded-lg p-4">
+          <p className="mb-2">🔍 Debug verisi bulunamadı</p>
+          <p className="text-xs">
+            Debug modu aktif olsa bile, veri henüz mevcut değil. Bir sorgu
+            gönderin veya backend&apos;den debug verisi geldiğinden emin olun.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const tabs = [
-    { id: "thinking", label: "Thinking Model", icon: "🧠" },
-    { id: "nlToSql", label: "NL to SQL", icon: "🔄" },
-    { id: "stages", label: "Stages", icon: "📊" },
-    { id: "execution", label: "Execution", icon: "⚡" },
+    {
+      id: "aiCalls",
+      label: "AI Calls",
+      icon: "🤖",
+      count: debugInfo.debug?.aiCalls?.length || 0,
+    },
+    {
+      id: "stages",
+      label: "Stages",
+      icon: "📊",
+      count:
+        debugInfo.debug?.stages?.length ||
+        Object.keys(debugInfo.stages || {}).length,
+    },
+    {
+      id: "timeline",
+      label: "Timeline",
+      icon: "⏱️",
+      count: debugInfo.debug?.aiCalls?.length || 0,
+    },
+    {
+      id: "raw",
+      label: "Raw Data",
+      icon: "🔧",
+      count: debugInfo.debug ? 2 : 1,
+    },
   ] as const;
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg">🔍</span>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          AI Debug Panel
-        </h3>
+    <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">🔍</span>
+          <h3 className="text-lg font-semibold text-zinc-100">
+            AI Debug Panel
+          </h3>
+          {debugInfo.debug?.totalDuration && (
+            <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
+              {debugInfo.debug.totalDuration}ms total
+            </span>
+          )}
+          {debugInfo.debug?.mode && (
+            <span className="text-xs px-2 py-1 bg-green-900/40 text-green-300 rounded-full">
+              {debugInfo.debug.mode}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={() => {
+            if (confirm("Debug verilerini temizlemek istiyor musunuz?")) {
+              onClearDebug?.();
+            }
+          }}
+          className="text-xs px-3 py-1 bg-red-900/40 text-red-300 border border-red-700/50 rounded-lg hover:bg-red-900/60 transition-colors"
+          title="Debug verilerini temizle"
+        >
+          🗑️ Temizle
+        </button>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex flex-wrap gap-1 mb-4 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+      <div className="flex flex-wrap gap-1 mb-4 bg-zinc-800 rounded-lg p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm"
-                : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                ? "bg-zinc-700 text-zinc-100 shadow-sm"
+                : "text-zinc-400 hover:text-zinc-100"
             }`}
           >
             <span className="mr-1">{tab.icon}</span>
             {tab.label}
+            {tab.count > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-zinc-600 rounded-full">
+                {tab.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
       <div className="space-y-4">
-        {activeTab === "thinking" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                📥 Input (User Query)
-              </h4>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                  {debugInfo.originalQuery || "N/A"}
-                </pre>
-              </div>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                📤 Output (Processed)
-              </h4>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                  {debugInfo.processedQuery || "N/A"}
-                </pre>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === "aiCalls" && (
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
+              🤖 AI Model Communications
+            </h4>
+            {debugInfo.debug?.aiCalls?.length ? (
+              debugInfo.debug.aiCalls.map((call, index) => (
+                <div
+                  key={index}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h5 className="font-semibold text-zinc-200">
+                        {call.modelName}
+                      </h5>
+                      <div className="text-xs text-zinc-400">
+                        {new Date(call.timestamp).toLocaleString("tr-TR")}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
+                        {call.duration}ms
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-1 rounded-full ${
+                          call.metadata.success
+                            ? "bg-green-900/40 text-green-300"
+                            : "bg-red-900/40 text-red-300"
+                        }`}
+                      >
+                        {call.metadata.success ? "✅ Başarılı" : "❌ Hatalı"}
+                      </span>
+                    </div>
+                  </div>
 
-        {activeTab === "nlToSql" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                📥 Input (Processed Query)
-              </h4>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                  {debugInfo.processedQuery || "N/A"}
-                </pre>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                      <h6 className="text-xs font-medium text-zinc-400 mb-2">
+                        📥 INPUT
+                      </h6>
+                      <div className="bg-zinc-900 border border-zinc-600 rounded p-3 max-h-48 overflow-auto">
+                        <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                          {typeof call.input === "string"
+                            ? call.input
+                            : JSON.stringify(call.input, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                    <div>
+                      <h6 className="text-xs font-medium text-zinc-400 mb-2">
+                        📤 OUTPUT
+                      </h6>
+                      <div className="bg-zinc-900 border border-zinc-600 rounded p-3 max-h-48 overflow-auto">
+                        <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                          {typeof call.output === "string"
+                            ? call.output
+                            : JSON.stringify(call.output, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  </div>
+
+                  {call.metadata && Object.keys(call.metadata).length > 0 && (
+                    <details className="mt-3">
+                      <summary className="text-xs text-zinc-400 cursor-pointer hover:text-zinc-200">
+                        📊 Metadata
+                      </summary>
+                      <div className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2">
+                        <pre className="text-xs text-zinc-400">
+                          {JSON.stringify(call.metadata, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+                <div className="text-zinc-400 text-sm mb-2">
+                  ❌ AI çağrı verisi bulunamadı
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Debug modunda AI model çağrıları burada görünecek. Şu anda hiç
+                  veri yok:
+                  <ul className="mt-1 ml-4 list-disc">
+                    <li>Backend debug modu kapalı olabilir</li>
+                    <li>API çağrısı henüz yapılmamış olabilir</li>
+                    <li>Debug verisi henüz işlenmemiş olabilir</li>
+                  </ul>
+                </div>
+                {debugInfo.thinkingModelInput && (
+                  <div className="mt-3 p-3 bg-zinc-900/50 rounded border border-zinc-600">
+                    <h6 className="text-xs font-medium text-zinc-400 mb-2">
+                      📥 Thinking Model Input (Fallback)
+                    </h6>
+                    <pre className="text-xs text-zinc-300">
+                      {JSON.stringify(debugInfo.thinkingModelInput, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                {debugInfo.thinkingModelOutput && (
+                  <div className="mt-2 p-3 bg-zinc-900/50 rounded border border-zinc-600">
+                    <h6 className="text-xs font-medium text-zinc-400 mb-2">
+                      📤 Thinking Model Output (Fallback)
+                    </h6>
+                    <pre className="text-xs text-zinc-300">
+                      {debugInfo.thinkingModelOutput}
+                    </pre>
+                  </div>
+                )}
               </div>
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                📤 Output (Generated SQL)
-              </h4>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-                <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300">
-                  {debugInfo.nlToSqlOutput || "N/A"}
-                </pre>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
         {activeTab === "stages" && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              🔄 Processing Stages
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
+              📊 Processing Stages
             </h4>
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-              {debugInfo.stages ? (
-                <div className="space-y-2">
-                  {Object.entries(debugInfo.stages).map(([stage, status]) => (
-                    <div key={stage} className="flex items-center gap-3">
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-20">
-                        {stage}:
-                      </span>
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          status === "completed"
-                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                            : status === "fallback"
-                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                            : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                        }`}
-                      >
-                        {status as string}
-                      </span>
-                    </div>
-                  ))}
+            {debugInfo.debug?.stages?.length ? (
+              debugInfo.debug.stages.map((stage, index) => (
+                <div
+                  key={index}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-zinc-200">
+                      {stage.stage}
+                    </span>
+                    <span className="text-xs text-zinc-400">
+                      {new Date(stage.timestamp).toLocaleString("tr-TR")}
+                    </span>
+                  </div>
+                  <div className="bg-zinc-900 border border-zinc-600 rounded p-3">
+                    <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                      {JSON.stringify(stage.data, null, 2)}
+                    </pre>
+                  </div>
                 </div>
-              ) : (
-                <span className="text-xs text-gray-500">
-                  No stage information
-                </span>
-              )}
-            </div>
+              ))
+            ) : (
+              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+                <div className="text-zinc-400 text-sm mb-2">
+                  ❌ İşlem aşaması verisi bulunamadı
+                </div>
+                <div className="text-xs text-zinc-500 mb-3">
+                  Debug modunda işlem aşamaları burada görünecek.
+                </div>
+                {debugInfo.stages &&
+                  Object.keys(debugInfo.stages).length > 0 && (
+                    <div className="space-y-2">
+                      <h6 className="text-xs font-medium text-zinc-400">
+                        📊 Mevcut Aşama Bilgileri (Fallback)
+                      </h6>
+                      {Object.entries(debugInfo.stages).map(([key, value]) => (
+                        <div
+                          key={key}
+                          className="bg-zinc-900/50 border border-zinc-600 rounded p-2"
+                        >
+                          <div className="text-xs font-medium text-zinc-300">
+                            {key}
+                          </div>
+                          <div className="text-xs text-zinc-400">
+                            {String(value)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+              </div>
+            )}
           </div>
         )}
 
-        {activeTab === "execution" && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-              ⚡ SQL Execution Result
+        {activeTab === "timeline" && (
+          <div className="space-y-4">
+            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
+              ⏱️ Execution Timeline
             </h4>
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded p-3">
-              <pre className="text-xs whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300 max-h-96 overflow-auto">
-                {debugInfo.executionResult
-                  ? JSON.stringify(debugInfo.executionResult, null, 2)
-                  : "No execution result"}
-              </pre>
+            {debugInfo.debug?.aiCalls?.length ? (
+              <div className="space-y-2">
+                {debugInfo.debug.aiCalls.map((call, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-3 bg-zinc-800 rounded p-3"
+                  >
+                    <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                    <div className="flex-1">
+                      <div className="text-sm text-zinc-200">
+                        {call.modelName}
+                      </div>
+                      <div className="text-xs text-zinc-400">
+                        {new Date(call.timestamp).toLocaleString("tr-TR")} -{" "}
+                        {call.duration}ms
+                      </div>
+                    </div>
+                    <div
+                      className={`w-2 h-2 rounded-full ${
+                        call.metadata.success ? "bg-green-500" : "bg-red-500"
+                      }`}
+                    ></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
+                <div className="text-zinc-400 text-sm mb-2">
+                  ❌ Zaman çizelgesi verisi bulunamadı
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Debug modunda AI çağrılarının zaman çizelgesi burada
+                  görünecek.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "raw" && (
+          <div>
+            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
+              🔧 Raw Debug Data
+            </h4>
+            <div className="space-y-4">
+              {debugInfo.debug && (
+                <div>
+                  <h5 className="text-xs font-medium text-zinc-400 mb-2">
+                    🔧 Backend Debug Data
+                  </h5>
+                  <div className="bg-zinc-800 border border-zinc-700 rounded p-3 max-h-64 overflow-auto">
+                    <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                      {JSON.stringify(debugInfo.debug, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+              <div>
+                <h5 className="text-xs font-medium text-zinc-400 mb-2">
+                  📋 Complete Debug Info
+                </h5>
+                <div className="bg-zinc-800 border border-zinc-700 rounded p-3 max-h-96 overflow-auto">
+                  <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
+                    {JSON.stringify(debugInfo, null, 2)}
+                  </pre>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1090,6 +1615,16 @@ function ConfigurationPanel({
     );
   }
 
+  if (!loading && !config) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-zinc-400">
+          Konfigürasyon servisi şu anda kullanılamıyor.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {error && (
@@ -1158,6 +1693,363 @@ function ConfigurationPanel({
             Kaydedilmemiş değişiklikler var
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ToolsPanel({
+  tools,
+  loading,
+  error,
+  selectedTool,
+  onSelectTool,
+  toolParams,
+  onUpdateParams,
+  executing,
+  result,
+  onExecute,
+  onRefresh,
+  categorizeTools,
+  expandedCategories,
+  onToggleCategory,
+}: {
+  tools: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: {
+      type: string;
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+  }>;
+  loading: boolean;
+  error: string | null;
+  selectedTool: string | null;
+  onSelectTool: (tool: string | null) => void;
+  toolParams: Record<string, unknown>;
+  onUpdateParams: (params: Record<string, unknown>) => void;
+  executing: boolean;
+  result: unknown;
+  onExecute: (
+    toolName: string,
+    args: Record<string, unknown>
+  ) => Promise<unknown>;
+  onRefresh: () => void;
+  categorizeTools: (
+    toolsList: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: {
+        type: string;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+    }>
+  ) => Record<
+    string,
+    Array<{
+      name: string;
+      description?: string;
+      inputSchema?: {
+        type: string;
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+    }>
+  >;
+  expandedCategories: Set<string>;
+  onToggleCategory: (category: string) => void;
+}) {
+  const selectedToolData = tools.find((t) => t.name === selectedTool);
+  const categorizedTools = categorizeTools(tools);
+
+  // Category icons mapping
+  const categoryIcons: Record<string, string> = {
+    "Database Schema": "🗄️",
+    "Database Query": "🔍",
+    "Database Management": "⚙️",
+    "Data Insert": "➕",
+    "Data Update": "✏️",
+    "Data Delete": "🗑️",
+    "Schema Management": "🔧",
+    Other: "📋",
+  };
+
+  const handleExecute = async () => {
+    if (!selectedTool) return;
+    try {
+      await onExecute(selectedTool, toolParams);
+    } catch (err) {
+      console.error("Tool execution failed:", err);
+    }
+  };
+
+  const handleParamChange = (key: string, value: unknown) => {
+    onUpdateParams({
+      ...toolParams,
+      [key]: value,
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-zinc-400">Araçlar yükleniyor...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl space-y-6 md:space-y-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
+            🔧 Mevcut Araçlar
+          </h2>
+          <p className="text-sm text-zinc-400 flex items-center gap-2">
+            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+            {tools.length} araç mevcut
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          className="px-6 py-3 rounded-2xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 text-sm font-medium border border-emerald-500/30 transition-all duration-300 transform hover:scale-105 backdrop-blur-sm"
+          disabled={loading}
+        >
+          <span className="flex items-center gap-2">
+            {loading ? (
+              <div className="w-4 h-4 border border-current border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              "🔄"
+            )}
+            Yenile
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-red-500/30 bg-gradient-to-r from-red-500/10 to-pink-500/10 backdrop-blur-sm text-red-300 p-4 text-sm shadow-lg">
+          <span className="flex items-center gap-2">
+            ⚠️ <strong>Hata:</strong> {error}
+          </span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8">
+        {/* Categorized Tools List */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
+            <span className="w-3 h-3 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full"></span>
+            Araç Kategorileri
+          </h3>
+          <div className="space-y-4 max-h-96 overflow-y-auto tools-scroll">
+            {Object.entries(categorizedTools).map(
+              ([category, categoryTools]) => (
+                <div
+                  key={category}
+                  className="border border-zinc-700/50 rounded-2xl bg-gradient-to-br from-zinc-800/40 to-zinc-900/60 backdrop-blur-sm shadow-xl hover:shadow-2xl transition-all duration-300"
+                >
+                  {/* Category Header */}
+                  <button
+                    onClick={() => onToggleCategory(category)}
+                    className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-800/30 transition-all duration-300 rounded-2xl group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl group-hover:scale-110 transition-transform duration-300">
+                        {categoryIcons[category]}
+                      </span>
+                      <div className="space-y-1">
+                        <span className="font-semibold text-zinc-100 group-hover:text-white transition-colors">
+                          {category}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-zinc-400 bg-zinc-700/50 px-3 py-1 rounded-full border border-zinc-600/30">
+                            {categoryTools.length} tool
+                          </span>
+                          {expandedCategories.has(category) && (
+                            <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">
+                              Açık
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-zinc-400 text-xl group-hover:text-zinc-200 transition-colors">
+                      {expandedCategories.has(category) ? "▼" : "▶"}
+                    </span>
+                  </button>
+
+                  {/* Category Tools */}
+                  {expandedCategories.has(category) && (
+                    <div className="border-t border-zinc-700/30 bg-zinc-900/60 rounded-b-2xl max-h-64 overflow-y-auto category-scroll">
+                      {categoryTools.map((tool: (typeof tools)[0]) => (
+                        <button
+                          key={tool.name}
+                          onClick={() => {
+                            onSelectTool(tool.name);
+                            onUpdateParams({});
+                          }}
+                          className={`w-full text-left p-4 border-b border-zinc-700/30 last:border-b-0 transition-all duration-300 group hover:bg-zinc-800/40 ${
+                            selectedTool === tool.name
+                              ? "bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-300 border-blue-500/30 shadow-lg"
+                              : "text-zinc-300 hover:text-zinc-100"
+                          } first:rounded-none last:rounded-b-2xl`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-1">
+                              <div className="font-medium text-sm group-hover:text-white transition-colors">
+                                {tool.name}
+                              </div>
+                              {tool.description && (
+                                <div className="text-xs text-zinc-400 line-clamp-2 group-hover:text-zinc-300 transition-colors">
+                                  {tool.description}
+                                </div>
+                              )}
+                            </div>
+                            {selectedTool === tool.name && (
+                              <div className="flex items-center gap-1">
+                                <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+                                <span className="text-xs text-blue-300">
+                                  Seçili
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+          </div>
+        </div>
+
+        {/* Tool Details & Execution */}
+        <div className="space-y-6">
+          {selectedToolData ? (
+            <div className="bg-gradient-to-br from-zinc-800/30 to-zinc-900/50 rounded-3xl p-6 border border-zinc-700/50 backdrop-blur-sm shadow-2xl space-y-6">
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl border border-blue-500/30 flex items-center justify-center">
+                    <span className="text-blue-400">🛠️</span>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-100">
+                      {selectedToolData.name}
+                    </h3>
+                    <span className="text-xs text-zinc-400 bg-zinc-700/50 px-2 py-1 rounded-full">
+                      Aktif Tool
+                    </span>
+                  </div>
+                </div>
+                {selectedToolData.description && (
+                  <p className="text-sm text-zinc-300 bg-zinc-800/30 rounded-xl p-4 border border-zinc-700/30">
+                    {selectedToolData.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Parameters */}
+              {selectedToolData.inputSchema?.properties && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
+                    Parametreler
+                  </h4>
+                  <div className="space-y-4 max-h-80 overflow-y-auto category-scroll">
+                    {Object.entries(
+                      selectedToolData.inputSchema.properties
+                    ).map(([key, schema]) => (
+                      <div key={key} className="space-y-2">
+                        <label className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                          {key}
+                          {selectedToolData.inputSchema?.required?.includes(
+                            key
+                          ) && (
+                            <span className="text-red-400 text-xs bg-red-500/20 px-2 py-1 rounded-full border border-red-500/30">
+                              Zorunlu *
+                            </span>
+                          )}
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 shadow-lg transition-all duration-300"
+                          placeholder={`${key} değeri girin...`}
+                          value={String(toolParams[key] || "")}
+                          onChange={(e) =>
+                            handleParamChange(key, e.target.value)
+                          }
+                        />
+                        {(() => {
+                          const desc = (schema as Record<string, unknown>)
+                            ?.description;
+                          if (desc && typeof desc === "string") {
+                            return (
+                              <p className="text-xs text-zinc-400 bg-zinc-800/30 rounded-lg p-2">
+                                💡 {desc}
+                              </p>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Execute Button */}
+              <button
+                onClick={handleExecute}
+                className="w-full px-8 py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white text-sm font-bold disabled:opacity-60 shadow-2xl hover:shadow-emerald-500/25 hover:scale-105 transition-all duration-300 transform disabled:hover:scale-100"
+                disabled={executing || !selectedTool}
+              >
+                <span className="flex items-center justify-center gap-3">
+                  {executing ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Çalıştırılıyor...
+                    </>
+                  ) : (
+                    <>
+                      🚀 <span>Aracı Çalıştır</span>
+                    </>
+                  )}
+                </span>
+              </button>
+
+              {/* Result */}
+              {result != null && (
+                <div className="space-y-4">
+                  <h4 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+                    Sonuç
+                  </h4>
+                  <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 backdrop-blur-sm shadow-xl">
+                    <div className="p-6 max-h-96 overflow-y-auto tools-scroll">
+                      <StepResultViewer result={result} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-16 text-zinc-400 space-y-4">
+              <div className="w-20 h-20 bg-gradient-to-br from-zinc-700/30 to-zinc-800/30 rounded-3xl flex items-center justify-center border border-zinc-700/50">
+                <span className="text-3xl">🛠️</span>
+              </div>
+              <div className="text-center space-y-2">
+                <p className="text-lg font-medium text-zinc-300">Araç Seçin</p>
+                <p className="text-sm text-zinc-500">
+                  Sol taraftan bir araç seçerek başlayın
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

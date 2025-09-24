@@ -11,9 +11,13 @@ const __dirname = dirname(__filename);
 const {
   MCP_TOOLBOX_URL,
   PORT = 3001,
-  CUSTOM_LLM_URL = "http://192.168.1.113:8002/api/generate",
-  THINKING_LLM_URL = "http://192.168.1.113:8001/api/generate",
+  CUSTOM_LLM_URL = "http://192.168.1.113:8001/api/generate",
+  INTERMEDIATE_LLM_URL = "http://192.168.1.113:8000/api/generate",
+  DEBUG_MODE = "true",
 } = process.env;
+
+// Debug mode state
+let isDebugMode = DEBUG_MODE.toLowerCase() === "true";
 
 if (!MCP_TOOLBOX_URL) {
   console.error("MCP_TOOLBOX_URL is required in .env");
@@ -21,116 +25,64 @@ if (!MCP_TOOLBOX_URL) {
 }
 const MCP_BASE = MCP_TOOLBOX_URL.trim().replace(/\/$/, "");
 
-// Check if thinking model is available
-let thinkingModelAvailable = null;
-async function checkThinkingModel() {
-  if (thinkingModelAvailable !== null) return thinkingModelAvailable;
-
-  try {
-    const testRes = await fetch(THINKING_LLM_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: "test", max_tokens: 10 }),
-      signal: AbortSignal.timeout(3000), // 3 second timeout
-    });
-    thinkingModelAvailable = testRes.ok;
-    console.log(`Thinking model availability: ${thinkingModelAvailable}`);
-  } catch (err) {
-    thinkingModelAvailable = false;
-    console.log(`Thinking model not available: ${err.message}`);
-  }
-
-  return thinkingModelAvailable;
-}
-
-// Thinking model - first stage LLM that processes user intent
-async function callThinkingModel(userMessage, opts = {}) {
+// Intermediate LLM model - processes and enhances user queries
+async function callIntermediateLLM(userMessage, opts = {}) {
+  // Use proper GenerateRequest format according to OpenAPI schema
   const bodyPayload = {
     message: userMessage,
-    max_tokens: opts.max_tokens || 200,
+    max_tokens: opts.max_tokens || 300,
+    temperature: opts.temperature || 0.7,
+    top_p: opts.top_p || 0.95,
+    do_sample: opts.do_sample !== undefined ? opts.do_sample : true,
   };
 
   console.log(
-    "Calling Thinking Model with:",
+    "Calling Intermediate LLM (Thinking SQL API) with:",
     JSON.stringify(bodyPayload, null, 2)
   );
 
   try {
-    const res = await fetch(THINKING_LLM_URL, {
+    const res = await fetch(INTERMEDIATE_LLM_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(bodyPayload),
-      signal: AbortSignal.timeout(10000), // 10 second timeout
+      signal: AbortSignal.timeout(30000), // 30 second timeout
     });
 
     const data = await res.json();
-    console.log("Thinking Model Response:", JSON.stringify(data, null, 2));
+    console.log("Intermediate LLM Response:", JSON.stringify(data, null, 2));
 
     if (!res.ok) {
       const errMsg = data?.error || data?.detail || res.statusText;
-      throw new Error(`Thinking model error ${res.status}: ${errMsg}`);
+      throw new Error(`Intermediate LLM error ${res.status}: ${errMsg}`);
     }
 
+    // According to ChatResponse schema, field should be "response"
     const response = data?.response;
     if (!response) {
-      console.log("Available thinking model data keys:", Object.keys(data));
-      throw new Error("Empty response from thinking model");
+      console.log("Available intermediate LLM data keys:", Object.keys(data));
+      console.log("Expected 'response' field from ChatResponse schema");
+      throw new Error("Empty response from intermediate LLM");
     }
 
     return response;
   } catch (err) {
-    console.log(`Thinking model call failed: ${err.message}`);
+    console.log(`Intermediate LLM call failed: ${err.message}`);
     throw err;
   }
 }
 
-// Fallback function when thinking model is not available
-function processQueryWithoutThinking(userQuery) {
-  console.log("Using fallback query processing (no thinking model)");
-
-  // Simple query preprocessing without AI
-  let processedQuery = userQuery.trim();
-
-  // Basic Turkish to English technical terms
-  const turkishTerms = {
-    kamera: "camera",
-    sensör: "sensor",
-    sıcaklık: "temperature",
-    veri: "data",
-    göster: "show",
-    getir: "get",
-    listele: "list",
-    sayı: "count",
-    aktif: "active",
-    pasif: "inactive",
-  };
-
-  // Replace Turkish terms
-  for (const [turkish, english] of Object.entries(turkishTerms)) {
-    processedQuery = processedQuery.replace(new RegExp(turkish, "gi"), english);
-  }
-
-  // Add helpful context for SQL generation
-  if (processedQuery.toLowerCase().includes("camera")) {
-    processedQuery += " (query about camera devices and their data)";
-  } else if (processedQuery.toLowerCase().includes("temperature")) {
-    processedQuery += " (query about temperature sensor readings)";
-  } else if (processedQuery.toLowerCase().includes("sensor")) {
-    processedQuery += " (query about sensor devices and signals)";
-  }
-
-  return processedQuery;
-}
-
-// NL to SQL model - second stage LLM that converts processed intent to SQL
-async function generateText(prompt, opts = {}) {
-  const bodyPayload = opts.payload || {
-    prompt,
-    max_length: Math.round(opts.max_length ?? 200),
+// NL to SQL model - converts natural language to SQL
+async function generateText(question, schema, opts = {}) {
+  // Use proper SQLRequest format according to OpenAPI schema
+  const bodyPayload = {
+    question: question,
+    schema: schema,
+    max_tokens: opts.max_tokens || 300,
   };
 
   console.log(
-    "Calling NL to SQL Model with:",
+    "Calling NL to SQL Model (SQLCoder API) with:",
     JSON.stringify(bodyPayload, null, 2)
   );
 
@@ -171,25 +123,18 @@ async function generateText(prompt, opts = {}) {
       const data = await res.json();
       console.log("NL to SQL Model Response:", JSON.stringify(data, null, 2));
 
-      const text =
-        data?.sql ||
-        data?.generated_text ||
-        data?.text ||
-        data?.response ||
-        data?.content ||
-        data?.output ||
-        data?.result ||
-        data?.answer ||
-        null;
+      // According to SQLResponse schema, field should be "sql"
+      const sql = data?.sql;
 
-      console.log("Extracted SQL text:", text);
+      console.log("Extracted SQL text:", sql);
 
-      if (!text) {
+      if (!sql) {
         console.log("Available NL to SQL data keys:", Object.keys(data));
+        console.log("Expected 'sql' field from SQLResponse schema");
         throw new Error("Empty response from NL to SQL model");
       }
 
-      return text;
+      return sql;
     } catch (error) {
       lastError = error;
       console.error(`NL to SQL attempt ${attempt} failed:`, error.message);
@@ -277,33 +222,28 @@ async function getMcpClient() {
 const CONFIG_FILE = join(__dirname, "config.json");
 
 const DEFAULT_CONFIG = {
-  system_prompt: `You are a SQL Request Analyzer. Your job is to analyze user requests and database schemas, then create extremely clear and specific instructions for a SQL generation model.
-
-CRITICAL: You do NOT generate SQL yourself. You only create detailed instructions.
+  system_prompt: `You are a SQL Generator. Your job is to convert natural language requests into valid SQL queries based on the provided database schema.
 
 Your task:
 1. Analyze the user's natural language request
-2. Examine the provided database schema  
-3. Create precise, unambiguous instructions for the SQL generator
+2. Examine the provided database schema
+3. Generate a valid SQL query that fulfills the request
 
-Output format should be a clear, structured instruction that includes:
-- What type of SQL operation is needed (SELECT, INSERT, UPDATE, DELETE)
-- Which specific tables and columns to use
-- What conditions/filters to apply
-- Any joins, aggregations, or sorting required
-- Expected result format
+Output requirements:
+- Return ONLY the SQL query, no explanations or markdown
+- Use exact table and column names from the schema
+- Ensure the query is syntactically correct
+- Use appropriate SQL operations (SELECT, INSERT, UPDATE, DELETE)
+- Include proper WHERE clauses, JOINs, and ORDER BY as needed
+- Handle date/time operations correctly
+- Use appropriate aggregation functions when needed
 
-Example good output:
-"Create a SELECT query that retrieves customer names and email addresses from the 'customers' table where the registration date is within the last 30 days. Use the 'name', 'email', and 'created_at' columns. Filter using DATE_SUB with INTERVAL 30 DAY. Order results by registration date descending."
+Example:
+User request: "Show me all active cameras"
+Schema: devices table with device_id, name, type, status columns
+Output: SELECT * FROM devices WHERE type = 'camera' AND status = 'active';
 
-Be extremely specific about:
-- Table names and column names (use exact names from schema)
-- Date/time operations and formats
-- Comparison operators and logic
-- Join conditions if multiple tables are involved
-- Aggregation functions if needed
-
-Never include actual SQL code - only natural language instructions that are crystal clear.`,
+Always generate clean, executable SQL without any additional text.`,
   schema: `-- Table for all devices
 CREATE TABLE devices (
     device_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -444,6 +384,23 @@ const server = createServer(async (req, res) => {
       return sendJSON(res, 200, { ok: true });
     }
 
+    // Debug mode endpoints
+    if (method === "POST" && url.pathname === "/debug/toggle") {
+      isDebugMode = !isDebugMode;
+      console.log(`🔧 Debug mode ${isDebugMode ? "ENABLED" : "DISABLED"}`);
+      return sendJSON(res, 200, {
+        debugMode: isDebugMode,
+        message: `Debug mode ${isDebugMode ? "enabled" : "disabled"}`,
+      });
+    }
+
+    if (method === "GET" && url.pathname === "/debug/status") {
+      return sendJSON(res, 200, {
+        debugMode: isDebugMode,
+        message: `Debug mode is ${isDebugMode ? "enabled" : "disabled"}`,
+      });
+    }
+
     // CORS test endpoint
     if (method === "GET" && url.pathname === "/cors-test") {
       return sendJSON(res, 200, {
@@ -466,50 +423,10 @@ const server = createServer(async (req, res) => {
       return sendJSON(res, 200, { result });
     }
 
-    if (method === "POST" && url.pathname === "/thinking") {
-      const body = (await parseBody(req)) || {};
-      const { message, max_tokens } = body;
-      if (!message || typeof message !== "string") {
-        return sendJSON(res, 400, { error: "'message' (string) is required" });
-      }
-
-      const isThinkingAvailable = await checkThinkingModel();
-
-      if (isThinkingAvailable) {
-        try {
-          const response = await callThinkingModel(message, { max_tokens });
-          return sendJSON(res, 200, {
-            originalMessage: message,
-            response: response,
-            stage: "thinking_only",
-            modelUsed: "thinking_model",
-          });
-        } catch (err) {
-          console.error("Thinking model error, using fallback:", err.message);
-          const fallbackResponse = processQueryWithoutThinking(message);
-          return sendJSON(res, 200, {
-            originalMessage: message,
-            response: fallbackResponse,
-            stage: "thinking_fallback",
-            modelUsed: "fallback_processing",
-            warning: "Thinking model not available, used fallback processing",
-          });
-        }
-      } else {
-        const fallbackResponse = processQueryWithoutThinking(message);
-        return sendJSON(res, 200, {
-          originalMessage: message,
-          response: fallbackResponse,
-          stage: "thinking_fallback",
-          modelUsed: "fallback_processing",
-          info: "Thinking model not available, used fallback processing",
-        });
-      }
-    }
-
+    // NL to SQL endpoint with debug support
     if (method === "POST" && url.pathname === "/nl") {
       const body = (await parseBody(req)) || {};
-      const { query, customSchema } = body;
+      const { query, customSchema, confirmDangerous = false } = body;
       if (!query || typeof query !== "string") {
         return sendJSON(res, 400, { error: "'query' (string) is required" });
       }
@@ -517,279 +434,297 @@ const server = createServer(async (req, res) => {
       console.log("=== Starting 2-Stage LLM Processing ===");
       console.log("Original user query:", query);
 
-      // STAGE 1: Process user intent with thinking model or fallback
+      // Track debug info
+      const debugData = {
+        request: {
+          endpoint: "/nl",
+          query: query,
+          customSchema: !!customSchema,
+          timestamp: new Date().toISOString(),
+        },
+        aiCalls: [],
+        stages: [],
+        totalDuration: 0,
+      };
+
+      const startTime = Date.now();
+
+      // STAGE 1: Process user query with intermediate LLM
       let processedQuery;
-      let thinkingStage = "pending";
+      try {
+        debugData.stages.push({
+          stage: "STAGE_1_START",
+          timestamp: new Date().toISOString(),
+          data: { originalQuery: query },
+        });
 
-      const isThinkingAvailable = await checkThinkingModel();
+        console.log("\n--- Stage 1: Intermediate LLM Processing ---");
+        const stage1Start = Date.now();
+        processedQuery = await callIntermediateLLM(query, {
+          max_tokens: 300,
+          temperature: 0.7,
+        });
+        const stage1Duration = Date.now() - stage1Start;
 
-      if (isThinkingAvailable) {
-        try {
-          console.log("\n--- Stage 1: Thinking Model ---");
-          processedQuery = await callThinkingModel(query, { max_tokens: 300 });
-          console.log("Thinking model processed query:", processedQuery);
-          thinkingStage = "completed";
-        } catch (thinkingErr) {
-          console.error(
-            "Thinking model failed, using fallback:",
-            thinkingErr.message
-          );
-          processedQuery = processQueryWithoutThinking(query);
-          thinkingStage = "fallback";
-        }
-      } else {
-        console.log(
-          "\n--- Stage 1: Fallback Processing (No Thinking Model) ---"
+        console.log("Intermediate LLM processed query:", processedQuery);
+
+        debugData.aiCalls.push({
+          modelName: "Intermediate LLM",
+          input: { message: query, max_tokens: 300, temperature: 0.7 },
+          output: processedQuery,
+          duration: stage1Duration,
+          timestamp: new Date().toISOString(),
+          metadata: { success: true, status: 200 },
+        });
+
+        debugData.stages.push({
+          stage: "STAGE_1_SUCCESS",
+          timestamp: new Date().toISOString(),
+          data: { originalQuery: query, processedQuery: processedQuery },
+        });
+      } catch (intermediateErr) {
+        console.error(
+          "Intermediate LLM failed, using original query:",
+          intermediateErr.message
         );
-        processedQuery = processQueryWithoutThinking(query);
-        console.log("Fallback processed query:", processedQuery);
-        thinkingStage = "fallback";
+        processedQuery = query; // Fallback to original query
+
+        debugData.aiCalls.push({
+          modelName: "Intermediate LLM",
+          input: { message: query, max_tokens: 300, temperature: 0.7 },
+          output: null,
+          duration: 0,
+          timestamp: new Date().toISOString(),
+          metadata: { success: false, error: intermediateErr.message },
+        });
+
+        debugData.stages.push({
+          stage: "STAGE_1_FALLBACK",
+          timestamp: new Date().toISOString(),
+          data: {
+            error: intermediateErr.message,
+            fallbackQuery: processedQuery,
+          },
+        });
       }
 
-      // Use custom schema or fallback to static schema
-      let schema = "";
-      if (customSchema) {
-        schema = customSchema;
-      } else {
-        // Static fallback schema
-        schema = `
-        -- Table for all devices
-CREATE TABLE devices (
-    device_id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    type ENUM('camera', 'sensor', 'gateway', 'other') NOT NULL,
-    location VARCHAR(255),
-    status ENUM('active', 'inactive', 'maintenance') DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+      // Use custom schema or attempt to fetch from external config service
+      let schema = customSchema;
+      let systemPrompt = null;
 
--- Specific table for cameras (extends devices)
-CREATE TABLE cameras (
-    camera_id INT AUTO_INCREMENT PRIMARY KEY,
-    device_id INT NOT NULL,
-    resolution VARCHAR(50), -- e.g. "1920x1080"
-    fps INT,                -- frames per second
-    ip_address VARCHAR(100),
-    angle_of_view DECIMAL(5,2), -- degrees
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
--- Signals table (raw or processed signals from devices)
-CREATE TABLE signals (
-    signal_id INT AUTO_INCREMENT PRIMARY KEY,
-    device_id INT NOT NULL,
-    signal_type ENUM('temperature', 'motion', 'video', 'audio', 'other') NOT NULL,
-    value VARCHAR(255),  -- can store raw data or references
-    unit VARCHAR(50),    -- e.g. °C, dB, JSON
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
--- Historical logs for signals
-CREATE TABLE signal_logs (
-    log_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    signal_id INT NOT NULL,
-    value VARCHAR(255),
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (signal_id) REFERENCES signals(signal_id) ON DELETE CASCADE
-);
-
--- Users who manage devices
-CREATE TABLE users (
-    user_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(100) UNIQUE NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
-    role ENUM('admin', 'operator', 'viewer') DEFAULT 'viewer',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Permissions for devices (user-device mapping)
-CREATE TABLE device_permissions (
-    permission_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    device_id INT NOT NULL,
-    can_view BOOLEAN DEFAULT TRUE,
-    can_control BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-    FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
-);
-
-        `;
+      if (!customSchema) {
+        try {
+          // Fetch config from external LLM service
+          const configRes = await fetch("http://192.168.1.113:8000/api/config");
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            schema = configData.schema;
+            systemPrompt = configData.system_prompt;
+          } else {
+            // If external config fails, don't show anything instead of static content
+            console.warn(
+              "External config service unavailable, skipping processing"
+            );
+            return sendJSON(res, 503, {
+              error: "Configuration service temporarily unavailable",
+              message: "Sistem konfigürasyonu şu anda mevcut değil",
+              retry: true,
+            });
+          }
+        } catch (configErr) {
+          console.warn("Failed to fetch external config:", configErr.message);
+          // If external config fails, don't show anything instead of static content
+          return sendJSON(res, 503, {
+            error: "Configuration service error",
+            message: "Sistem konfigürasyonu erişilemez durumda",
+            details: configErr.message,
+            retry: true,
+          });
+        }
       }
 
       // STAGE 2: Convert processed query to SQL using NL to SQL model
-      let rawResponse;
+      let sql;
       try {
+        debugData.stages.push({
+          stage: "STAGE_2_START",
+          timestamp: new Date().toISOString(),
+          data: { processedQuery: processedQuery, schemaLength: schema.length },
+        });
+
         console.log("\n--- Stage 2: NL to SQL Model ---");
+        const stage2Start = Date.now();
 
-        // Truncate very long schemas to prevent model overload
-        let truncatedSchema = schema;
-        if (schema.length > 4000) {
-          truncatedSchema =
-            schema.substring(0, 4000) +
-            "\n-- Schema truncated for model stability";
-          console.log("Schema truncated to prevent model overload");
-        }
+        // Send planner output directly to SQL generator
+        const rawResponse = await generateText(processedQuery, schema, {
+          max_tokens: 300,
+        });
 
-        rawResponse = await generateText("", {
-          payload: {
+        const stage2Duration = Date.now() - stage2Start;
+        sql = (rawResponse || "").trim();
+
+        debugData.aiCalls.push({
+          modelName: "NL to SQL Model",
+          input: {
             question: processedQuery,
-            schema: truncatedSchema,
+            schema: schema.substring(0, 100) + "...",
+            max_tokens: 300,
           },
-          max_length: 500,
+          output: sql,
+          duration: stage2Duration,
+          timestamp: new Date().toISOString(),
+          metadata: { success: true, status: 200 },
+        });
+
+        debugData.stages.push({
+          stage: "STAGE_2_SUCCESS",
+          timestamp: new Date().toISOString(),
+          data: { sql: sql },
         });
       } catch (sqlErr) {
         console.error("NL to SQL model failed:", sqlErr.message);
 
-        // Check if it's a connection issue
-        const isConnectionError =
-          sqlErr.message.includes("fetch failed") ||
-          sqlErr.message.includes("timeout") ||
-          sqlErr.message.includes("ECONNREFUSED");
+        debugData.aiCalls.push({
+          modelName: "NL to SQL Model",
+          input: {
+            question: processedQuery,
+            schema: schema ? schema.substring(0, 100) + "..." : "No schema",
+            max_tokens: 300,
+          },
+          output: null,
+          duration: 0,
+          timestamp: new Date().toISOString(),
+          metadata: { success: false, error: sqlErr.message },
+        });
 
         return sendJSON(res, 500, {
           error: "NL to SQL model failed",
           details: sqlErr.message,
-          stage: "nl_to_sql",
+          originalQuery: query,
           processedQuery: processedQuery,
-          isConnectionError: isConnectionError,
-          suggestion: isConnectionError
-            ? "Check if NL to SQL model server is running"
-            : "Model processing error",
         });
       }
 
-      // Clean up SQL response
-      let sql = (rawResponse || "").trim();
-
-      // Remove everything after first semicolon if it's not SQL
-      const semicolonIndex = sql.indexOf(";");
-      if (semicolonIndex !== -1) {
-        const afterSemicolon = sql.substring(semicolonIndex + 1).trim();
-        if (
-          afterSemicolon &&
-          !afterSemicolon.match(
-            /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|SELECT|COMMIT|ROLLBACK)/i
-          )
-        ) {
-          sql = sql.substring(0, semicolonIndex + 1);
-        }
-      }
-
-      // Remove markdown and instruction text
-      sql = sql.replace(/^```\w*\n?/gm, "").replace(/\n?```$/gm, "");
-      sql = sql.replace(/^(Return ONLY the SQL statement[\s\S]*?\n)/i, "");
-      sql = sql.replace(/^\s*-\s.*$/gm, "");
-
-      // Find first SQL keyword
-      const firstSql = sql.match(
-        /\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|SELECT)\b/i
-      );
-      if (firstSql) sql = sql.slice(firstSql.index);
-
-      // Final cleanup
-      sql = sql.replace(/^(SQL|MySQL|Query):\s*/i, "");
-      sql = sql.replace(/\s+###.*$/s, "");
-      sql = sql.replace(/\s+I want to.*$/s, "");
-      sql = sql.trim();
-
-      // Remove CREATE TABLE statements (AI sometimes generates these unnecessarily)
-      sql = sql.replace(/CREATE\s+TABLE[^;]*;?\s*/gi, "");
-
-      // Evaluate completeness BEFORE altering with semicolons
-      const parenOpen = (sql.match(/\(/g) || []).length;
-      const parenClose = (sql.match(/\)/g) || []).length;
-      const endsSuspicious = /[,(]$/.test(sql);
-      const hasOpenCount = /COUNT\s*\(\s*[^)]*$/i.test(sql);
-      if (!sql || parenOpen > parenClose || endsSuspicious || hasOpenCount) {
-        return sendJSON(res, 200, {
-          sql,
-          executionResult: {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: "SQL appears incomplete (unbalanced parentheses or trailing token); not executing.",
-              },
-            ],
-          },
-        });
-      }
-
-      // Keep only the first complete statement (if multiple provided)
+      // Execute SQL: support multiple statements sequentially
       const statements = sql
         .split(";")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
-      if (statements.length > 0) {
-        sql = statements[0];
-      }
 
-      // Convert PostgreSQL syntax to MySQL
-      sql = sql.replace(/\bILIKE\b/gi, "LIKE");
-      sql = sql.replace(/\bSIMILAR TO\b/gi, "REGEXP");
-      sql = sql.replace(/\b::\w+\b/g, ""); // Remove type casting
-      sql = sql.replace(/\bRETURNING\b.*$/gim, ""); // Remove RETURNING clauses
-      sql = sql.replace(/\bLIMIT\s+\d+\s+OFFSET\s+(\d+)\b/gi, "LIMIT $1, $2"); // Convert LIMIT OFFSET to MySQL format
+      const dangerousRegex = /\b(DROP|TRUNCATE)\b/i;
+      const dangerousStatements = statements
+        .map((stmt, index) => ({ index, stmt }))
+        .filter(({ stmt }) => dangerousRegex.test(stmt));
 
-      // Final trim after all cleaning
-      sql = sql.trim();
-
-      // Block execution if SQL looks incomplete or ends mid-token
-      const looksIncomplete =
-        /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)\b\s*$/i.test(
-          sql
-        ) ||
-        /[,\(]$/.test(sql) ||
-        /COUNT\s*\(\s*$/i.test(sql);
-      if (!sql || looksIncomplete) {
-        return sendJSON(res, 200, {
-          sql,
-          executionResult: {
-            isError: true,
-            content: [
-              {
-                type: "text",
-                text: "SQL looks incomplete after cleaning; not executing. Please refine the question or provide a clearer schema.",
-              },
-            ],
+      if (dangerousStatements.length && !confirmDangerous) {
+        debugData.stages.push({
+          stage: "SQL_DANGEROUS_DETECTED",
+          timestamp: new Date().toISOString(),
+          data: {
+            count: dangerousStatements.length,
+            statements: dangerousStatements,
           },
+        });
+        return sendJSON(res, 409, {
+          requiresConfirmation: true,
+          message:
+            "Bu işlem DROP/TRUNCATE içeriyor. Devam etmek istiyor musunuz?",
+          dangerous: dangerousStatements,
+          originalQuery: query,
+          processedQuery,
+          sql,
         });
       }
 
-      // Execute SQL
-      let executionResult = null;
-      try {
-        console.log("Executing SQL:", sql);
-        executionResult = await callTool("mysql_execute_sql", { sql: sql });
-        console.log("SQL execution result:", executionResult);
-      } catch (execErr) {
-        console.error("SQL execution failed:", execErr.message);
+      const maxStatements = 5;
+      const executionResults = [];
+
+      for (let i = 0; i < Math.min(statements.length, maxStatements); i++) {
+        const stmt = statements[i];
+        const start = Date.now();
+        let stepResult = null;
+
+        try {
+          const result = await callTool("mysql_execute_sql", { sql: stmt });
+          stepResult = {
+            index: i,
+            sql: stmt,
+            durationMs: Date.now() - start,
+            result,
+          };
+          executionResults.push(stepResult);
+          debugData.stages.push({
+            stage: "SQL_EXECUTION_SUCCESS",
+            timestamp: new Date().toISOString(),
+            data: stepResult,
+          });
+        } catch (execErr) {
+          stepResult = {
+            index: i,
+            sql: stmt,
+            durationMs: Date.now() - start,
+            error: execErr.message,
+          };
+          executionResults.push(stepResult);
+          debugData.stages.push({
+            stage: "SQL_EXECUTION_ERROR",
+            timestamp: new Date().toISOString(),
+            data: stepResult,
+          });
+        }
       }
+
+      // Backward compatibility: expose last successful result as executionResult
+      const lastOk = [...executionResults].reverse().find((r) => !r.error);
+      const executionResult = lastOk
+        ? lastOk.result
+        : executionResults[executionResults.length - 1] || null;
+
+      debugData.totalDuration = Date.now() - startTime;
+      debugData.stages.push({
+        stage: "FINAL_RESPONSE",
+        timestamp: new Date().toISOString(),
+        data: {
+          originalQuery: query,
+          processedQuery: processedQuery,
+          sql: sql,
+        },
+      });
 
       console.log("\n=== Final Response ===");
       console.log("Original query:", query);
       console.log("Processed query:", processedQuery);
       console.log("Generated SQL:", sql);
-      console.log("Execution result:", executionResult);
 
-      return sendJSON(res, 200, {
+      const response = {
         originalQuery: query,
         processedQuery: processedQuery,
         sql: sql,
+        statements,
+        executionResults,
         executionResult: executionResult,
         stages: {
-          thinking: thinkingStage,
+          intermediate: "completed",
           nlToSql: "completed",
-          sqlExecution: executionResult ? "completed" : "failed",
+          sqlExecution: executionResults.length ? "completed" : "skipped",
         },
-      });
+      };
+
+      // Add debug information if debug mode is enabled
+      if (isDebugMode) {
+        response.debug = {
+          mode: "enabled",
+          ...debugData,
+        };
+      }
+
+      return sendJSON(res, 200, response);
     }
 
     // API Generate endpoint for SQL generation
     if (method === "POST" && url.pathname === "/api/generate") {
       const body = (await parseBody(req)) || {};
-      const { message, max_tokens = 300 } = body;
+      const { message, max_tokens = 9999 } = body;
 
       if (!message || typeof message !== "string") {
         return sendJSON(res, 422, {
@@ -809,28 +744,21 @@ CREATE TABLE device_permissions (
         console.log("=== API Generate Processing ===");
         console.log("Original message:", message);
 
-        // STAGE 1: Process user intent with thinking model or fallback
-        let processedQuery;
-        const isThinkingAvailable = await checkThinkingModel();
-
-        if (isThinkingAvailable) {
-          try {
-            console.log("\n--- Stage 1: Thinking Model ---");
-            processedQuery = await callThinkingModel(message, {
-              max_tokens: Math.min(max_tokens, 300),
-            });
-            console.log("Thinking model processed query:", processedQuery);
-          } catch (thinkingErr) {
-            console.error(
-              "Thinking model failed, using fallback:",
-              thinkingErr.message
-            );
-            processedQuery = processQueryWithoutThinking(message);
-          }
-        } else {
-          console.log("\n--- Stage 1: Fallback Processing ---");
-          processedQuery = processQueryWithoutThinking(message);
-          console.log("Fallback processed query:", processedQuery);
+        // STAGE 1: Process user message with intermediate LLM
+        let processedMessage;
+        try {
+          console.log("\n--- Stage 1: Intermediate LLM Processing ---");
+          processedMessage = await callIntermediateLLM(message, {
+            max_tokens: Math.min(max_tokens, 300),
+            temperature: 0.7,
+          });
+          console.log("Intermediate LLM processed message:", processedMessage);
+        } catch (intermediateErr) {
+          console.error(
+            "Intermediate LLM failed, using original message:",
+            intermediateErr.message
+          );
+          processedMessage = message; // Fallback to original message
         }
 
         // STAGE 2: Convert to SQL using NL to SQL model
@@ -847,13 +775,9 @@ CREATE TABLE device_permissions (
             console.log("Schema truncated to prevent model overload");
           }
 
-          const rawResponse = await generateText("", {
-            payload: {
-              question: processedQuery,
-              schema: schema,
-              system_prompt: config.system_prompt,
-            },
-            max_length: Math.min(max_tokens, 500),
+          // Send planner output directly to SQL generator
+          const rawResponse = await generateText(processedMessage, schema, {
+            max_tokens: Math.min(max_tokens, 300),
           });
 
           // Clean up SQL response (same logic as existing /nl endpoint)
@@ -943,52 +867,55 @@ CREATE TABLE device_permissions (
       }
     }
 
-    // API Config GET endpoint
+    // API Config GET endpoint - proxy to external service
     if (method === "GET" && url.pathname === "/api/config") {
       try {
-        const config = getConfig();
-        return sendJSON(res, 200, {
-          system_prompt: config.system_prompt,
-          schema: config.schema,
-        });
+        const configRes = await fetch("http://192.168.1.113:8000/api/config");
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          return sendJSON(res, 200, configData);
+        } else {
+          // If external config fails, return error instead of showing static content
+          console.warn("External config service unavailable");
+          return sendJSON(res, 503, {
+            error: "Configuration service temporarily unavailable",
+            message: "Konfigürasyon servisi şu anda erişilemez",
+            retry: true,
+          });
+        }
       } catch (err) {
         console.error("Config GET error:", err.message);
-        return sendJSON(res, 500, {
-          detail: [
-            {
-              loc: ["internal"],
-              msg: err.message,
-              type: "internal_error",
-            },
-          ],
+        // If external config fails, return error instead of showing static content
+        return sendJSON(res, 503, {
+          error: "Configuration service error",
+          message: "Konfigürasyon servisi hatası",
+          details: err.message,
+          retry: true,
         });
       }
     }
 
-    // API Config PUT endpoint
+    // API Config PUT endpoint - proxy to external service
     if (method === "PUT" && url.pathname === "/api/config") {
       try {
         const body = (await parseBody(req)) || {};
-        const { system_prompt, schema } = body;
 
-        const updates = {};
-        if (system_prompt !== undefined) updates.system_prompt = system_prompt;
-        if (schema !== undefined) updates.schema = schema;
+        // Forward request to external service
+        const configRes = await fetch("http://192.168.1.113:8000/api/config", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
 
-        if (Object.keys(updates).length === 0) {
-          return sendJSON(res, 422, {
-            detail: [
-              {
-                loc: ["body"],
-                msg: "At least one field (system_prompt or schema) is required",
-                type: "value_error.missing",
-              },
-            ],
-          });
+        if (configRes.ok) {
+          const result = await configRes.json();
+          return sendJSON(res, 200, result);
+        } else {
+          const errorData = await configRes.json();
+          return sendJSON(res, configRes.status, errorData);
         }
-
-        const updatedConfig = saveConfig(updates);
-        return sendJSON(res, 200, "Configuration updated successfully");
       } catch (err) {
         console.error("Config PUT error:", err.message);
         return sendJSON(res, 500, {
@@ -1013,4 +940,9 @@ CREATE TABLE device_permissions (
 
 server.listen(Number(PORT), () => {
   console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`🔧 Debug mode: ${isDebugMode ? "🟢 ENABLED" : "🔴 DISABLED"}`);
+  if (isDebugMode) {
+    console.log("🔍 Debug endpoints available:");
+    console.log("  POST /debug/toggle   - Toggle debug mode");
+  }
 });
