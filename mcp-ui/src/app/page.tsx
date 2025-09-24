@@ -512,7 +512,7 @@ export default function Home() {
                     MCP Workspace
                   </h1>
                   <p className="text-sm text-gray-400">
-                    🚀 Natural language to MCP Toolbox tools
+                    Natural language to MCP Toolbox tools
                   </p>
                 </div>
               </div>

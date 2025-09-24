@@ -30,7 +30,7 @@ async function callIntermediateLLM(userMessage, opts = {}) {
   // Use proper GenerateRequest format according to OpenAPI schema
   const bodyPayload = {
     message: userMessage,
-    max_tokens: opts.max_tokens || 300,
+    max_tokens: opts.max_tokens || 1024,
     temperature: opts.temperature || 0.7,
     top_p: opts.top_p || 0.95,
     do_sample: opts.do_sample !== undefined ? opts.do_sample : true,
@@ -461,16 +461,22 @@ const server = createServer(async (req, res) => {
         console.log("\n--- Stage 1: Intermediate LLM Processing ---");
         const stage1Start = Date.now();
         processedQuery = await callIntermediateLLM(query, {
-          max_tokens: 300,
+          max_tokens: 1024,
           temperature: 0.7,
         });
         const stage1Duration = Date.now() - stage1Start;
 
-        console.log("Intermediate LLM processed query:", processedQuery);
+        // Use planner output as-is (no sanitizer)
+        processedQuery = String(processedQuery || "");
+
+        console.log(
+          "Intermediate LLM processed query (one sentence):",
+          processedQuery
+        );
 
         debugData.aiCalls.push({
           modelName: "Intermediate LLM",
-          input: { message: query, max_tokens: 300, temperature: 0.7 },
+          input: { message: query, max_tokens: 1024, temperature: 0.7 },
           output: processedQuery,
           duration: stage1Duration,
           timestamp: new Date().toISOString(),
@@ -557,7 +563,7 @@ const server = createServer(async (req, res) => {
 
         // Send planner output directly to SQL generator
         const rawResponse = await generateText(processedQuery, schema, {
-          max_tokens: 300,
+          max_tokens: 1000,
         });
 
         const stage2Duration = Date.now() - stage2Start;
@@ -568,7 +574,7 @@ const server = createServer(async (req, res) => {
           input: {
             question: processedQuery,
             schema: schema.substring(0, 100) + "...",
-            max_tokens: 300,
+            max_tokens: 1000,
           },
           output: sql,
           duration: stage2Duration,
@@ -749,7 +755,7 @@ const server = createServer(async (req, res) => {
         try {
           console.log("\n--- Stage 1: Intermediate LLM Processing ---");
           processedMessage = await callIntermediateLLM(message, {
-            max_tokens: Math.min(max_tokens, 300),
+            max_tokens: Math.min(max_tokens, 1024),
             temperature: 0.7,
           });
           console.log("Intermediate LLM processed message:", processedMessage);
@@ -775,9 +781,17 @@ const server = createServer(async (req, res) => {
             console.log("Schema truncated to prevent model overload");
           }
 
+          // Normalize planner output to one sentence (max 30 words)
+          const compact = String(processedMessage || "")
+            .replace(/\s+/g, " ")
+            .trim();
+          let oneSentence = compact.split(/[.!?]/)[0] || compact;
+          const words = oneSentence.split(" ").filter(Boolean);
+          if (words.length > 30) oneSentence = words.slice(0, 30).join(" ");
+
           // Send planner output directly to SQL generator
-          const rawResponse = await generateText(processedMessage, schema, {
-            max_tokens: Math.min(max_tokens, 300),
+          const rawResponse = await generateText(oneSentence, schema, {
+            max_tokens: Math.min(max_tokens, 1000),
           });
 
           // Clean up SQL response (same logic as existing /nl endpoint)
