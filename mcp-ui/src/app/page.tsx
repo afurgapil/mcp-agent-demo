@@ -104,38 +104,48 @@ function formatCell(v: unknown): string {
 }
 
 // Debug panel types
-type DebugInfo = {
-  originalQuery?: string;
-  processedQuery?: string;
-  thinkingModelInput?: Record<string, unknown>;
-  thinkingModelOutput?: string;
-  nlToSqlInput?: Record<string, unknown>;
-  nlToSqlOutput?: string;
-  stages?: Record<string, string>;
-  executionResult?: unknown;
-  // New debug fields from backend
-  debug?: {
-    mode: string;
-    request: {
-      endpoint: string;
-      query: string;
-      timestamp: string;
-    };
-    aiCalls: Array<{
-      modelName: string;
-      input: unknown;
-      output: unknown;
-      duration: number;
-      timestamp: string;
-      metadata: Record<string, unknown>;
-    }>;
-    stages: Array<{
-      stage: string;
-      timestamp: string;
-      data: unknown;
-    }>;
-    totalDuration: number;
+type DebugPayload = {
+  mode?: string;
+  request?: {
+    endpoint?: string;
+    prompt?: string;
+    timestamp?: string;
   };
+  aiCalls?: Array<{
+    modelName: string;
+    input: unknown;
+    output: unknown;
+    duration: number;
+    timestamp: string;
+    metadata: Record<string, unknown>;
+  }>;
+  stages?: Array<{
+    stage: string;
+    timestamp: string;
+    data: unknown;
+  }>;
+  totalDuration?: number;
+  rawModelResponse?: unknown;
+  rawResponseText?: unknown;
+  toolSelectorUrl?: string;
+  toolsConsidered?: Array<{
+    name: string;
+    description?: string;
+    arguments?: Array<{
+      name: string;
+      type?: string;
+      required?: boolean;
+      description?: string;
+    }>;
+    hasAdditionalArguments?: boolean;
+  }>;
+};
+
+type SelectionResult = {
+  prompt: string;
+  tool: string | null;
+  reason?: string;
+  confidence?: number | null;
 };
 
 export default function Home() {
@@ -147,10 +157,8 @@ export default function Home() {
   const [summary, setSummary] = useState<string | null>(null);
   const [execSteps, setExecSteps] = useState<StepResult[]>([]);
   const [raw, setRaw] = useState<unknown>(null);
-  const hasResults = useMemo(
-    () => !!summary || execSteps.length > 0 || !!plan,
-    [summary, execSteps, plan]
-  );
+  const [selection, setSelection] = useState<SelectionResult | null>(null);
+  const hasResults = useMemo(() => !!selection, [selection]);
   const finalStep = execSteps.length ? execSteps[execSteps.length - 1] : null;
   const finalResult = finalStep?.result;
   const [openPlan, setOpenPlan] = useState(true);
@@ -158,7 +166,7 @@ export default function Home() {
 
   // Debug panel state
   const [debugMode, setDebugMode] = useState(true);
-  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
+  const [debugData, setDebugData] = useState<DebugPayload | null>(null);
 
   // Check debug mode status on mount
   useEffect(() => {
@@ -434,46 +442,40 @@ export default function Home() {
     setSummary(null);
     setRaw(null);
     setExecSteps([]);
+    setSelection(null);
     try {
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/nl`, {
+      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          query,
-          customSchema: customSchema,
+          prompt: query,
+          max_tokens: 512,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || res.statusText);
+      if (!res.ok) {
+        const detailMessage =
+          data?.error ||
+          data?.detail?.[0]?.msg ||
+          data?.message ||
+          res.statusText;
+        throw new Error(detailMessage);
+      }
       setPlan(data.plan ?? null);
       setExecSteps(Array.isArray(data.steps) ? data.steps : []);
       setSummary(data.summary ?? null);
       setRaw(data);
 
-      // Extract debug information from response - ensure all data exists
-      const debugData: DebugInfo = {
-        originalQuery: data.originalQuery || query,
-        processedQuery: data.processedQuery || query,
-        thinkingModelInput: { message: query, max_tokens: 300 },
-        thinkingModelOutput: data.processedQuery || query,
-        nlToSqlInput: {
-          question: data.processedQuery || query,
-          schema: customSchema || "default schema",
-        },
-        nlToSqlOutput: data.sql || "No SQL generated",
-        stages: data.stages || {},
-        executionResult: data.executionResult,
-        debug: data.debug || null, // Backend debug info
-      };
-
-      // Only set debug info if we have meaningful data
-      if (data.debug || data.originalQuery || data.processedQuery || data.sql) {
-        setDebugInfo(debugData);
-      } else {
-        setDebugInfo(null);
-      }
+      setSelection({
+        prompt: data.prompt || query,
+        tool: data.tool ?? null,
+        reason: data.reason,
+        confidence:
+          typeof data.confidence === "number" ? data.confidence : null,
+      });
+      setDebugData(data.debug || null);
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "İstek başarısız oldu";
@@ -655,12 +657,20 @@ CREATE TABLE students (
                     setSummary(null);
                     setRaw(null);
                     setExecSteps([]);
+                    setSelection(null);
+                    setDebugData(null);
                   }}
                 >
                   <span className="flex items-center gap-2"> Temizle</span>
                 </button>
               </div>
             </form>
+            {selection && (
+              <SelectionCard
+                selection={selection}
+                loading={loading}
+              />
+            )}
           </div>
         )}
 
@@ -802,11 +812,11 @@ CREATE TABLE students (
         )}
 
         {/* Debug Panel - only show on query tab */}
-        {activeTab === "query" && debugMode && debugInfo && (
+        {activeTab === "query" && debugMode && debugData && (
           <div className="mt-6">
             <DebugPanel
-              debugInfo={debugInfo}
-              onClearDebug={() => setDebugInfo(null)}
+              debug={debugData}
+              onClearDebug={() => setDebugData(null)}
             />
           </div>
         )}
@@ -870,6 +880,73 @@ function ResultCard({
           <pre className="text-xs whitespace-pre-wrap break-words">
             {JSON.stringify(result ?? {}, null, 2)}
           </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SelectionCard({
+  selection,
+  loading,
+}: {
+  selection: SelectionResult;
+  loading?: boolean;
+}) {
+  const confidenceText =
+    typeof selection.confidence === "number"
+      ? `${Math.round(selection.confidence * 100)}%`
+      : "Belirsiz";
+
+  return (
+    <div className="mt-6 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4 shadow-lg">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold text-blue-100 flex items-center gap-2">
+          🔧 Seçilen Araç
+        </h2>
+        <span className="text-xs px-2 py-1 rounded-full bg-blue-900/50 text-blue-200 border border-blue-500/40">
+          {loading ? "Güncelleniyor..." : "Sonuç"}
+        </span>
+      </div>
+
+      <div className="space-y-3 text-sm">
+        <div>
+          <span className="text-xs uppercase tracking-wide text-blue-300/80">
+            Kullanıcı Promptu
+          </span>
+          <p className="mt-1 text-blue-100/90 whitespace-pre-wrap break-words">
+            {selection.prompt}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="p-3 rounded-xl bg-blue-900/30 border border-blue-500/30">
+            <span className="text-xs uppercase tracking-wide text-blue-300/80">
+              Araç
+            </span>
+            <div className="mt-1 text-base font-semibold text-blue-100">
+              {selection.tool ? selection.tool : "Uygun araç bulunamadı"}
+            </div>
+          </div>
+          <div className="p-3 rounded-xl bg-blue-900/30 border border-blue-500/30">
+            <span className="text-xs uppercase tracking-wide text-blue-300/80">
+              Güven
+            </span>
+            <div className="mt-1 text-base font-semibold text-blue-100">
+              {confidenceText}
+            </div>
+          </div>
+        </div>
+
+        {selection.reason && (
+          <div className="p-3 rounded-xl bg-blue-900/20 border border-blue-500/20">
+            <span className="text-xs uppercase tracking-wide text-blue-300/80">
+              Gerekçe
+            </span>
+            <p className="mt-1 text-blue-100/90 whitespace-pre-wrap break-words">
+              {selection.reason}
+            </p>
+          </div>
         )}
       </div>
     </div>
@@ -1175,63 +1252,24 @@ function PlanRoadmap({ steps }: { steps: Step[] }) {
 }
 
 function DebugPanel({
-  debugInfo,
+  debug,
   onClearDebug,
 }: {
-  debugInfo: DebugInfo | null;
+  debug: DebugPayload;
   onClearDebug?: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<
-    "aiCalls" | "stages" | "timeline" | "raw"
-  >("aiCalls");
-
-  if (!debugInfo) {
-    return (
-      <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-lg">🔍</span>
-          <h3 className="text-lg font-semibold text-zinc-100">
-            AI Debug Panel
-          </h3>
-        </div>
-        <div className="text-zinc-400 text-sm bg-zinc-800/50 rounded-lg p-4">
-          <p className="mb-2">🔍 Debug verisi bulunamadı</p>
-          <p className="text-xs">
-            Debug modu aktif olsa bile, veri henüz mevcut değil. Bir sorgu
-            gönderin veya backend&apos;den debug verisi geldiğinden emin olun.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const [activeTab, setActiveTab] = useState<"aiCalls" | "tools" | "stages" | "raw">(
+    "aiCalls"
+  );
+  const aiCalls = debug.aiCalls || [];
+  const stages = debug.stages || [];
+  const tools = debug.toolsConsidered || [];
 
   const tabs = [
-    {
-      id: "aiCalls",
-      label: "AI Calls",
-      icon: "🤖",
-      count: debugInfo.debug?.aiCalls?.length || 0,
-    },
-    {
-      id: "stages",
-      label: "Stages",
-      icon: "📊",
-      count:
-        debugInfo.debug?.stages?.length ||
-        Object.keys(debugInfo.stages || {}).length,
-    },
-    {
-      id: "timeline",
-      label: "Timeline",
-      icon: "⏱️",
-      count: debugInfo.debug?.aiCalls?.length || 0,
-    },
-    {
-      id: "raw",
-      label: "Raw Data",
-      icon: "🔧",
-      count: debugInfo.debug ? 2 : 1,
-    },
+    { id: "aiCalls", label: "AI Calls", icon: "🤖", count: aiCalls.length },
+    { id: "tools", label: "Tools", icon: "🧰", count: tools.length },
+    { id: "stages", label: "Stages", icon: "📊", count: stages.length },
+    { id: "raw", label: "Raw", icon: "🔧", count: 1 },
   ] as const;
 
   return (
@@ -1239,17 +1277,15 @@ function DebugPanel({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-lg">🔍</span>
-          <h3 className="text-lg font-semibold text-zinc-100">
-            AI Debug Panel
-          </h3>
-          {debugInfo.debug?.totalDuration && (
+          <h3 className="text-lg font-semibold text-zinc-100">AI Debug Panel</h3>
+          {typeof debug.totalDuration === "number" && (
             <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
-              {debugInfo.debug.totalDuration}ms total
+              {debug.totalDuration}ms
             </span>
           )}
-          {debugInfo.debug?.mode && (
+          {debug.mode && (
             <span className="text-xs px-2 py-1 bg-green-900/40 text-green-300 rounded-full">
-              {debugInfo.debug.mode}
+              {debug.mode}
             </span>
           )}
         </div>
@@ -1260,13 +1296,11 @@ function DebugPanel({
             }
           }}
           className="text-xs px-3 py-1 bg-red-900/40 text-red-300 border border-red-700/50 rounded-lg hover:bg-red-900/60 transition-colors"
-          title="Debug verilerini temizle"
         >
           🗑️ Temizle
         </button>
       </div>
 
-      {/* Tab Navigation */}
       <div className="flex flex-wrap gap-1 mb-4 bg-zinc-800 rounded-lg p-1">
         {tabs.map((tab) => (
           <button
@@ -1289,263 +1323,153 @@ function DebugPanel({
         ))}
       </div>
 
-      {/* Tab Content */}
-      <div className="space-y-4">
-        {activeTab === "aiCalls" && (
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
-              🤖 AI Model Communications
-            </h4>
-            {debugInfo.debug?.aiCalls?.length ? (
-              debugInfo.debug.aiCalls.map((call, index) => (
-                <div
-                  key={index}
-                  className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h5 className="font-semibold text-zinc-200">
-                        {call.modelName}
-                      </h5>
-                      <div className="text-xs text-zinc-400">
-                        {new Date(call.timestamp).toLocaleString("tr-TR")}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
-                        {call.duration}ms
-                      </span>
-                      <span
-                        className={`text-xs px-2 py-1 rounded-full ${
-                          call.metadata.success
-                            ? "bg-green-900/40 text-green-300"
-                            : "bg-red-900/40 text-red-300"
-                        }`}
-                      >
-                        {call.metadata.success ? "✅ Başarılı" : "❌ Hatalı"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div>
-                      <h6 className="text-xs font-medium text-zinc-400 mb-2">
-                        📥 INPUT
-                      </h6>
-                      <div className="bg-zinc-900 border border-zinc-600 rounded p-3 max-h-48 overflow-auto">
-                        <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                          {typeof call.input === "string"
-                            ? call.input
-                            : JSON.stringify(call.input, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
-                    <div>
-                      <h6 className="text-xs font-medium text-zinc-400 mb-2">
-                        📤 OUTPUT
-                      </h6>
-                      <div className="bg-zinc-900 border border-zinc-600 rounded p-3 max-h-48 overflow-auto">
-                        <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                          {typeof call.output === "string"
-                            ? call.output
-                            : JSON.stringify(call.output, null, 2)}
-                        </pre>
-                      </div>
-                    </div>
-                  </div>
-
-                  {call.metadata && Object.keys(call.metadata).length > 0 && (
-                    <details className="mt-3">
-                      <summary className="text-xs text-zinc-400 cursor-pointer hover:text-zinc-200">
-                        📊 Metadata
-                      </summary>
-                      <div className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2">
-                        <pre className="text-xs text-zinc-400">
-                          {JSON.stringify(call.metadata, null, 2)}
-                        </pre>
-                      </div>
-                    </details>
-                  )}
-                </div>
-              ))
-            ) : (
-              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
-                <div className="text-zinc-400 text-sm mb-2">
-                  ❌ AI çağrı verisi bulunamadı
-                </div>
-                <div className="text-xs text-zinc-500">
-                  Debug modunda AI model çağrıları burada görünecek. Şu anda hiç
-                  veri yok:
-                  <ul className="mt-1 ml-4 list-disc">
-                    <li>Backend debug modu kapalı olabilir</li>
-                    <li>API çağrısı henüz yapılmamış olabilir</li>
-                    <li>Debug verisi henüz işlenmemiş olabilir</li>
-                  </ul>
-                </div>
-                {debugInfo.thinkingModelInput && (
-                  <div className="mt-3 p-3 bg-zinc-900/50 rounded border border-zinc-600">
-                    <h6 className="text-xs font-medium text-zinc-400 mb-2">
-                      📥 Thinking Model Input (Fallback)
-                    </h6>
-                    <pre className="text-xs text-zinc-300">
-                      {JSON.stringify(debugInfo.thinkingModelInput, null, 2)}
-                    </pre>
-                  </div>
-                )}
-                {debugInfo.thinkingModelOutput && (
-                  <div className="mt-2 p-3 bg-zinc-900/50 rounded border border-zinc-600">
-                    <h6 className="text-xs font-medium text-zinc-400 mb-2">
-                      📤 Thinking Model Output (Fallback)
-                    </h6>
-                    <pre className="text-xs text-zinc-300">
-                      {debugInfo.thinkingModelOutput}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "stages" && (
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
-              📊 Processing Stages
-            </h4>
-            {debugInfo.debug?.stages?.length ? (
-              debugInfo.debug.stages.map((stage, index) => (
-                <div
-                  key={index}
-                  className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-zinc-200">
-                      {stage.stage}
-                    </span>
-                    <span className="text-xs text-zinc-400">
-                      {new Date(stage.timestamp).toLocaleString("tr-TR")}
-                    </span>
-                  </div>
-                  <div className="bg-zinc-900 border border-zinc-600 rounded p-3">
-                    <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                      {JSON.stringify(stage.data, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
-                <div className="text-zinc-400 text-sm mb-2">
-                  ❌ İşlem aşaması verisi bulunamadı
-                </div>
-                <div className="text-xs text-zinc-500 mb-3">
-                  Debug modunda işlem aşamaları burada görünecek.
-                </div>
-                {debugInfo.stages &&
-                  Object.keys(debugInfo.stages).length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-medium text-zinc-400">
-                        📊 Mevcut Aşama Bilgileri (Fallback)
-                      </h6>
-                      {Object.entries(debugInfo.stages).map(([key, value]) => (
-                        <div
-                          key={key}
-                          className="bg-zinc-900/50 border border-zinc-600 rounded p-2"
-                        >
-                          <div className="text-xs font-medium text-zinc-300">
-                            {key}
-                          </div>
-                          <div className="text-xs text-zinc-400">
-                            {String(value)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "timeline" && (
-          <div className="space-y-4">
-            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
-              ⏱️ Execution Timeline
-            </h4>
-            {debugInfo.debug?.aiCalls?.length ? (
-              <div className="space-y-2">
-                {debugInfo.debug.aiCalls.map((call, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-3 bg-zinc-800 rounded p-3"
-                  >
-                    <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                    <div className="flex-1">
-                      <div className="text-sm text-zinc-200">
-                        {call.modelName}
-                      </div>
-                      <div className="text-xs text-zinc-400">
-                        {new Date(call.timestamp).toLocaleString("tr-TR")} -{" "}
-                        {call.duration}ms
-                      </div>
-                    </div>
-                    <div
-                      className={`w-2 h-2 rounded-full ${
-                        call.metadata.success ? "bg-green-500" : "bg-red-500"
-                      }`}
-                    ></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-4">
-                <div className="text-zinc-400 text-sm mb-2">
-                  ❌ Zaman çizelgesi verisi bulunamadı
-                </div>
-                <div className="text-xs text-zinc-500">
-                  Debug modunda AI çağrılarının zaman çizelgesi burada
-                  görünecek.
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "raw" && (
-          <div>
-            <h4 className="text-sm font-semibold text-zinc-300 mb-2">
-              🔧 Raw Debug Data
-            </h4>
-            <div className="space-y-4">
-              {debugInfo.debug && (
-                <div>
-                  <h5 className="text-xs font-medium text-zinc-400 mb-2">
-                    🔧 Backend Debug Data
-                  </h5>
-                  <div className="bg-zinc-800 border border-zinc-700 rounded p-3 max-h-64 overflow-auto">
-                    <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                      {JSON.stringify(debugInfo.debug, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              )}
-              <div>
-                <h5 className="text-xs font-medium text-zinc-400 mb-2">
-                  📋 Complete Debug Info
-                </h5>
-                <div className="bg-zinc-800 border border-zinc-700 rounded p-3 max-h-96 overflow-auto">
-                  <pre className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                    {JSON.stringify(debugInfo, null, 2)}
-                  </pre>
-                </div>
-              </div>
+      {activeTab === "aiCalls" && (
+        <div className="space-y-4">
+          {aiCalls.length === 0 ? (
+            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
+              AI çağrısı kaydı bulunamadı.
             </div>
-          </div>
-        )}
-      </div>
+          ) : (
+            aiCalls.map((call, index) => (
+              <div
+                key={index}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h5 className="font-semibold text-zinc-200">
+                      {call.modelName}
+                    </h5>
+                    <div className="text-xs text-zinc-400">
+                      {new Date(call.timestamp).toLocaleString("tr-TR")}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
+                      {call.duration}ms
+                    </span>
+                    <span
+                      className={`text-xs px-2 py-1 rounded-full ${
+                        call.metadata?.success
+                          ? "bg-green-900/40 text-green-300"
+                          : "bg-yellow-900/40 text-yellow-300"
+                      }`}
+                    >
+                      {call.metadata?.success ? "Başarılı" : "Bilinmiyor"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <DebugJsonCard title="Input" value={call.input} />
+                  <DebugJsonCard title="Output" value={call.output} />
+                </div>
+
+                {call.metadata && (
+                  <details className="mt-3 text-xs text-zinc-400">
+                    <summary className="cursor-pointer">Metadata</summary>
+                    <pre className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2 text-[11px] max-h-48 overflow-auto">
+                      {JSON.stringify(call.metadata, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === "tools" && (
+        <div className="space-y-3">
+          {tools.length === 0 ? (
+            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
+              Araç listesi sağlanmadı.
+            </div>
+          ) : (
+            tools.map((tool) => (
+              <div
+                key={tool.name}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-zinc-100">{tool.name}</h4>
+                </div>
+                {tool.description && (
+                  <p className="mt-2 text-sm text-zinc-300">{tool.description}</p>
+                )}
+                <div className="mt-2 text-xs text-zinc-400 space-y-1">
+                  <div className="font-semibold text-zinc-300 uppercase tracking-wide">
+                    Arguments
+                  </div>
+                  {tool.arguments && tool.arguments.length > 0 ? (
+                    <ul className="space-y-1">
+                      {tool.arguments.map((arg) => (
+                        <li key={arg.name} className="leading-snug">
+                          <span className="text-zinc-200">{arg.name}</span>
+                          <span className="text-zinc-500">: {arg.type || "any"}</span>
+                          {arg.required && (
+                            <span className="text-blue-300"> (required)</span>
+                          )}
+                          {arg.description && (
+                            <span className="text-zinc-400"> – {arg.description}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-zinc-500">Argüman tanımı yok</div>
+                  )}
+                  {tool.hasAdditionalArguments && (
+                    <div className="text-zinc-500">… diğer argümanlar gösterilmedi</div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === "stages" && (
+        <div className="space-y-3">
+          {stages.length === 0 ? (
+            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
+              Aşama kaydı yok.
+            </div>
+          ) : (
+            stages.map((stage, index) => (
+              <div
+                key={index}
+                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-zinc-100">
+                    {stage.stage}
+                  </span>
+                  <span className="text-xs text-zinc-400">
+                    {new Date(stage.timestamp).toLocaleString("tr-TR")}
+                  </span>
+                </div>
+                <pre className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2 text-[11px] max-h-48 overflow-auto">
+                  {JSON.stringify(stage.data, null, 2)}
+                </pre>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {activeTab === "raw" && (
+        <div className="space-y-3 text-xs text-zinc-300">
+          <DebugJsonCard title="Request" value={debug.request} />
+          <DebugJsonCard title="Raw Model Response" value={debug.rawModelResponse} />
+          <DebugJsonCard title="Raw Response Text" value={debug.rawResponseText} />
+          <DebugJsonCard title="Full Debug" value={debug} />
+        </div>
+      )}
     </div>
   );
 }
+
 
 function ConfigurationPanel({
   config,
@@ -1698,6 +1622,32 @@ function ConfigurationPanel({
   );
 }
 
+function DebugJsonCard({
+  title,
+  value,
+}: {
+  title: string;
+  value: unknown;
+}) {
+  let displayValue: string;
+  try {
+    displayValue = JSON.stringify(value, null, 2) ?? "null";
+  } catch {
+    displayValue = String(value);
+  }
+  if (displayValue === undefined) {
+    displayValue = "undefined";
+  }
+
+  return (
+    <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3">
+      <h5 className="text-xs font-semibold text-zinc-300 mb-2">{title}</h5>
+      <pre className="text-[11px] text-zinc-300 bg-zinc-900 border border-zinc-600 rounded p-2 max-h-48 overflow-auto whitespace-pre-wrap break-words">
+        {displayValue}
+      </pre>
+    </div>
+  );
+}
 function ToolsPanel({
   tools,
   loading,
