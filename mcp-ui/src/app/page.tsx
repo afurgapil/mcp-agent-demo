@@ -1,115 +1,18 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3001";
-
-type MCPResult = {
-  content?: Array<{ text?: string }>;
-  rows?: Array<Record<string, unknown>>;
-  // Allow extra properties without using any
-  [key: string]: unknown;
-};
-
-// Extract row objects from a typical MCP result
-function extractRows(result: unknown): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
-  if (!result || typeof result !== "object") return rows;
-  const r = result as MCPResult;
-  // Common pattern: content: [{ type: 'text', text: '{"k":"v"}' }, ...]
-  if (Array.isArray(r.content)) {
-    for (const item of r.content) {
-      const txt = item?.text;
-      if (typeof txt === "string") {
-        try {
-          const obj = JSON.parse(txt);
-          if (obj && typeof obj === "object") rows.push(obj);
-        } catch {
-          // ignore non-JSON lines
-        }
-      }
-    }
-  }
-  // Fallbacks: some tools may return direct arrays/rows
-  if (Array.isArray(r.rows)) {
-    for (const obj of r.rows) {
-      if (obj && typeof obj === "object")
-        rows.push(obj as Record<string, unknown>);
-    }
-  }
-  return rows;
-}
-
-function DataTable({ rows }: { rows: Array<Record<string, unknown>> }) {
-  if (!rows || rows.length === 0) return null;
-  const cols = Array.from(new Set(rows.flatMap((o) => Object.keys(o))));
-  const limited = rows.slice(0, 50);
-  return (
-    <div className="overflow-x-auto border border-zinc-800 rounded-lg mt-2 shadow-sm">
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-zinc-900 text-gray-300">
-          <tr>
-            {cols.map((c) => (
-              <th key={c} className="px-3 py-2 font-medium whitespace-nowrap">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {limited.map((row, i) => (
-            <tr
-              key={i}
-              className="border-t border-zinc-800 hover:bg-zinc-900/60 transition"
-            >
-              {cols.map((c) => (
-                <td
-                  key={c}
-                  className="px-3 py-2 align-top whitespace-pre-wrap break-words"
-                >
-                  {formatCell(row[c])}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length > limited.length && (
-        <div className="px-3 py-2 text-xs text-gray-500">
-          Showing first {limited.length} rows of {rows.length}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatCell(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
-function schemaSourceLabel(source?: string | null): string | null {
-  if (!source) return null;
-  switch (source) {
-    case "custom":
-      return "Kullanıcı isteği";
-    case "config":
-      return "Konfigürasyon";
-    case "fetched":
-      return "MCP'den otomatik";
-    case "cache":
-      return "MCP önbelleği";
-    case "none":
-      return "Belirtilmedi";
-    default:
-      return source;
-  }
-}
+import { extractRows, schemaSourceLabel } from "../utils/format";
+import { DataTable } from "../components";
+import {
+  getDebugStatus,
+  toggleDebug as apiToggleDebug,
+  fetchConfig as apiFetchConfig,
+  updateConfig as apiUpdateConfig,
+  fetchTools as apiFetchTools,
+  callTool as apiCallTool,
+  generate as apiGenerate,
+} from "../services/api";
+const MODEL_STORAGE_KEY = "mcp_ui_model";
 
 // Debug panel types
 type DebugPayload = {
@@ -148,34 +51,50 @@ export default function Home() {
   // Debug panel state
   const [debugMode, setDebugMode] = useState(true);
   const [debugData, setDebugData] = useState<DebugPayload | null>(null);
+  const [model, setModel] = useState<string>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        return localStorage.getItem(MODEL_STORAGE_KEY) || "";
+      }
+    } catch {}
+    return "";
+  });
+  const provider = useMemo(() => {
+    if (model === "custom") return "custom";
+    return "deepseek";
+  }, [model]);
 
   // Check debug mode status on mount
   useEffect(() => {
-    const checkDebugMode = async () => {
-      try {
-        const res = await fetch(`${API_BASE.replace(/\/$/, "")}/debug/status`);
-        if (res.ok) {
-          const data = await res.json();
-          setDebugMode(data.debugMode || false);
-        }
-      } catch (err) {
-        console.warn("Could not check debug mode status:", err);
-      }
-    };
-    checkDebugMode();
+    getDebugStatus()
+      .then((d) => setDebugMode(!!d.debugMode))
+      .catch(() => {});
+    try {
+      const savedModel =
+        typeof window !== "undefined"
+          ? localStorage.getItem(MODEL_STORAGE_KEY)
+          : null;
+      if (savedModel) setModel(savedModel);
+    } catch {}
   }, []);
+
+  // Persist model selection locally
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return;
+      if (model) {
+        localStorage.setItem(MODEL_STORAGE_KEY, model);
+      } else {
+        localStorage.removeItem(MODEL_STORAGE_KEY);
+      }
+    } catch {}
+  }, [model]);
 
   // Toggle debug mode on backend
   const toggleDebugMode = async () => {
     try {
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/debug/toggle`, {
-        method: "POST",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDebugMode(data.debugMode);
-        console.log(`Debug mode ${data.debugMode ? "enabled" : "disabled"}`);
-      }
+      const data = await apiToggleDebug();
+      setDebugMode(!!data.debugMode);
     } catch (err) {
       console.error("Failed to toggle debug mode:", err);
     }
@@ -294,21 +213,26 @@ export default function Home() {
   useEffect(() => {
     loadConfig();
     loadTools();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-fetch config when model/provider changes
+  useEffect(() => {
+    loadConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
 
   async function loadConfig() {
     setConfigLoading(true);
     setConfigError(null);
     try {
-      // Fetch config via backend (which proxies to external LLM service)
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`);
-      if (res.ok) {
-        const data = await res.json();
-        setConfig(data);
-      } else {
-        // If config fetch fails, don't show error - just silently fail
-        console.warn("Configuration service unavailable");
-        setConfig(null);
+      // Fetch config via backend
+      const data = await apiFetchConfig(
+        model === "custom" ? "custom" : "deepseek"
+      );
+      setConfig(data);
+      if (!model && typeof (data as { model?: string })?.model === "string") {
+        setModel(((data as { model?: string }).model as string) || "");
       }
     } catch (err: unknown) {
       // If config fetch fails, don't show error - just silently fail
@@ -323,10 +247,9 @@ export default function Home() {
     setToolsLoading(true);
     setToolsError(null);
     try {
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/tools`);
-      if (res.ok) {
-        const data = await res.json();
-        const normalized = (data.tools || []).map((tool: Record<string, unknown>) => {
+      const data = await apiFetchTools();
+      const normalized = (data.tools || []).map(
+        (tool: Record<string, unknown>) => {
           const inputSchema =
             (tool as Record<string, unknown>).inputSchema ||
             (tool as Record<string, unknown>).input_schema ||
@@ -335,12 +258,9 @@ export default function Home() {
             ...tool,
             inputSchema,
           };
-        });
-        setTools(normalized as typeof tools);
-      } else {
-        console.warn("Tools service unavailable");
-        setTools([]);
-      }
+        }
+      );
+      setTools(normalized as typeof tools);
     } catch (err: unknown) {
       console.warn("Tools fetch failed:", err);
       setTools([]);
@@ -353,25 +273,9 @@ export default function Home() {
     setToolExecuting(true);
     setToolsError(null);
     try {
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/tool`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: toolName,
-          args: args,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setToolResult(data.result);
-        return data.result;
-      } else {
-        const errorData = await res.json();
-        throw new Error(errorData?.error || "Tool execution failed");
-      }
+      const data = await apiCallTool(toolName, args);
+      setToolResult(data.result);
+      return data.result;
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "Tool execution failed";
@@ -389,25 +293,13 @@ export default function Home() {
     setConfigLoading(true);
     setConfigError(null);
     try {
-      // Save config via backend (which proxies to external LLM service)
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/config`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(newConfig),
-      });
-
-      if (res.ok) {
-        // Reload config to get updated values
-        await loadConfig();
-        return true;
-      } else {
-        const errorData = await res.json();
-        throw new Error(
-          errorData?.detail?.[0]?.msg || "Configuration kaydetme hatası"
-        );
-      }
+      // Save config via backend
+      await apiUpdateConfig(
+        newConfig,
+        model === "custom" ? "custom" : "deepseek"
+      );
+      await loadConfig();
+      return true;
     } catch (err: unknown) {
       setConfigError(
         err instanceof Error ? err.message : "Configuration kaydetme hatası"
@@ -436,28 +328,17 @@ export default function Home() {
     setDebugData(null);
     setSchemaSource(null);
     try {
-      const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          prompt: query,
-          schema: customSchema,
-        }),
+      const data = await apiGenerate({
+        prompt: query,
+        schema: customSchema,
+        provider: provider as "deepseek" | "custom",
+        ...(model ? { model } : {}),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        const detailMessage =
-          data?.error ||
-          data?.detail?.[0]?.msg ||
-          data?.message ||
-          res.statusText;
-        throw new Error(detailMessage);
-      }
       setRaw(data);
       setGeneratedSql(typeof data.sql === "string" ? data.sql : null);
-      setModelOutput(typeof data.rawModelOutput === "string" ? data.rawModelOutput : null);
+      setModelOutput(
+        typeof data.rawModelOutput === "string" ? data.rawModelOutput : null
+      );
       setExecutionResult(data.executionResult ?? null);
       setDebugData(data.debug || null);
       setSchemaSource(
@@ -507,6 +388,17 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <select
+                className="text-xs px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50 text-zinc-200"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                title="Model"
+              >
+                <option value="">Default</option>
+                <option value="deepseek-chat">deepseek-chat</option>
+                <option value="deepseek-reasoner">deepseek-reasoner</option>
+                <option value="custom">Custom</option>
+              </select>
               <button
                 onClick={toggleDebugMode}
                 className={`text-xs px-4 py-2 inline-flex items-center rounded-xl transition-all duration-300 transform hover:scale-105 ${
@@ -517,6 +409,7 @@ export default function Home() {
               >
                 🔍 Debug {debugMode ? "ON" : "OFF"}
               </button>
+
               <div
                 className={`text-xs px-4 py-2 inline-flex items-center rounded-xl border backdrop-blur-sm ${
                   loading || configLoading
@@ -550,7 +443,7 @@ export default function Home() {
               }`}
             >
               <span className="flex items-center gap-2">
-                📝 <span>SQL Sorgu</span>
+                📝 <span>SQL Query</span>
               </span>
             </button>
             <button
@@ -562,7 +455,7 @@ export default function Home() {
               }`}
             >
               <span className="flex items-center gap-2">
-                🔧 <span>Araçlar</span>
+                🔧 <span>Tools</span>
               </span>
             </button>
             <button
@@ -574,7 +467,7 @@ export default function Home() {
               }`}
             >
               <span className="flex items-center gap-2">
-                ⚙️ <span>Konfigürasyon</span>
+                ⚙️ <span>Configuration</span>
               </span>
             </button>
           </div>
@@ -584,35 +477,17 @@ export default function Home() {
         {activeTab === "query" && (
           <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl">
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+              <div className="grid grid-cols-1 gap-4 md:gap-6">
                 <div className="space-y-2">
                   <label className="text-sm font-semibold mb-2 text-zinc-100 flex items-center gap-2">
                     <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-                    Sorgu
+                    Query
                   </label>
                   <textarea
                     className="w-full h-36 rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 shadow-xl transition-all duration-300"
-                    placeholder="örn., Son 30 gün içinde alışveriş yapan müşteriler kimler?"
+                    placeholder="e.g., Which customers purchased in the last 30 days?"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold mb-2 text-zinc-100 flex items-center gap-2">
-                    <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
-                    Veritabanı Şeması (Opsiyonel)
-                  </label>
-                  <textarea
-                    className="w-full h-36 rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 shadow-xl font-mono transition-all duration-300"
-                    placeholder={`Özel şema girin veya boş bırakın (varsayılan şema kullanılacak)
-
-CREATE TABLE students (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT
-);`}
-                    value={customSchema}
-                    onChange={(e) => setCustomSchema(e.target.value)}
                   />
                 </div>
               </div>
@@ -626,10 +501,10 @@ CREATE TABLE students (
                     {loading ? (
                       <>
                         <div className="w-4 h-4 border border-white border-t-transparent rounded-full animate-spin"></div>
-                        Gönderiliyor...
+                        Submitting...
                       </>
                     ) : (
-                      <>Gönder</>
+                      <>Submit</>
                     )}
                   </span>
                 </button>
@@ -648,7 +523,7 @@ CREATE TABLE students (
                     setSchemaSource(null);
                   }}
                 >
-                  <span className="flex items-center gap-2"> Temizle</span>
+                  <span className="flex items-center gap-2"> Clear</span>
                 </button>
               </div>
             </form>
@@ -1006,7 +881,9 @@ function StepResultViewer({ result }: { result: unknown }) {
           hasRows ? (
             <DataTable rows={rows} />
           ) : (
-            <div className="text-xs text-gray-500">Gösterilecek tablo verisi yok</div>
+            <div className="text-xs text-gray-500">
+              Gösterilecek tablo verisi yok
+            </div>
           )
         ) : (
           <pre className="text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto custom-scroll">
@@ -1058,19 +935,27 @@ function DebugPanel({
 
       <div className="space-y-3">
         {debug.schema && (
-          <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+          <details
+            className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3"
+            open
+          >
             <summary className="cursor-pointer text-sm text-zinc-200">
               Şema Bilgisi
             </summary>
             <div className="mt-2 text-xs text-zinc-300 space-y-1">
               {debug.schema.source && (
                 <div>
-                  Kaynak: <span className="text-zinc-100">{schemaSourceLabel(debug.schema.source)}</span>
+                  Kaynak:{" "}
+                  <span className="text-zinc-100">
+                    {schemaSourceLabel(debug.schema.source)}
+                  </span>
                 </div>
               )}
               {typeof debug.schema.length === "number" && (
                 <div>
-                  Uzunluk: <span className="text-zinc-100">{debug.schema.length}</span> karakter
+                  Uzunluk:{" "}
+                  <span className="text-zinc-100">{debug.schema.length}</span>{" "}
+                  karakter
                 </div>
               )}
             </div>
@@ -1085,7 +970,10 @@ function DebugPanel({
           </details>
         )}
 
-        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+        <details
+          className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3"
+          open
+        >
           <summary className="cursor-pointer text-sm text-zinc-200">
             Deepseek Request
           </summary>
@@ -1094,7 +982,10 @@ function DebugPanel({
           </div>
         </details>
 
-        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+        <details
+          className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3"
+          open
+        >
           <summary className="cursor-pointer text-sm text-zinc-200">
             Deepseek Response
           </summary>
@@ -1103,14 +994,20 @@ function DebugPanel({
           </div>
         </details>
 
-        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+        <details
+          className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3"
+          open
+        >
           <summary className="cursor-pointer text-sm text-zinc-200">
             MCP Execution
           </summary>
           <div className="mt-2 space-y-2">
             {typeof debug.execution?.durationMs === "number" && (
               <div className="text-xs text-zinc-400">
-                Süre: <span className="text-zinc-200">{debug.execution.durationMs}ms</span>
+                Süre:{" "}
+                <span className="text-zinc-200">
+                  {debug.execution.durationMs}ms
+                </span>
               </div>
             )}
             <DebugJsonCard title="Result" value={debug.execution?.result} />
@@ -1129,7 +1026,6 @@ function DebugPanel({
     </div>
   );
 }
-
 
 function ConfigurationPanel({
   config,
@@ -1282,13 +1178,7 @@ function ConfigurationPanel({
   );
 }
 
-function DebugJsonCard({
-  title,
-  value,
-}: {
-  title: string;
-  value: unknown;
-}) {
+function DebugJsonCard({ title, value }: { title: string; value: unknown }) {
   let displayValue: string;
   try {
     displayValue = JSON.stringify(value, null, 2) ?? "null";

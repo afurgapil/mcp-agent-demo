@@ -1,6 +1,7 @@
 import { sendJSON } from "../utils/response.js";
 import { getConfig, saveConfig } from "../services/config.service.js";
 import { callDeepseekForSql } from "../services/deepseek.service.js";
+import { callCustomForSql } from "../services/custom.service.js";
 import {
   tryLoadSchemaSummary,
   getAutoSchemaFromCache,
@@ -33,7 +34,12 @@ export async function reloadSchema(req, res) {
 
 export async function generateHandler(req, res) {
   const body = req.body || {};
-  const { prompt, schema: customSchema } = body;
+  const {
+    prompt,
+    schema: customSchema,
+    model: requestedModel,
+    provider,
+  } = body;
   if (!prompt || typeof prompt !== "string") {
     return sendJSON(res, 422, {
       detail: [
@@ -88,30 +94,50 @@ export async function generateHandler(req, res) {
   };
 
   try {
-    const deepseekResponse = await callDeepseekForSql({
-      userPrompt: prompt,
-      schema: schemaToUse,
-      systemPrompt: config.system_prompt,
-    });
+    const useProvider =
+      (typeof provider === "string" && provider.trim()) || "deepseek";
+    const llmResponse =
+      useProvider === "custom"
+        ? await callCustomForSql({
+            userPrompt: prompt,
+            schema: schemaToUse,
+            systemPrompt: config.system_prompt,
+            apiBase:
+              config?.providers?.custom?.apiBase || process.env.CUSTOM_API_BASE,
+          })
+        : await callDeepseekForSql({
+            userPrompt: prompt,
+            schema: schemaToUse,
+            systemPrompt: config.system_prompt,
+            model:
+              typeof requestedModel === "string" && requestedModel.trim()
+                ? requestedModel.trim()
+                : config.model || undefined,
+          });
 
     debugInfo.deepseek = {
-      request: deepseekResponse.request,
-      response: deepseekResponse.response,
+      request: llmResponse.request,
+      response: llmResponse.response,
     };
 
     const { result: executionResult, durationMs } = await executeSqlThroughMcp(
-      deepseekResponse.sql
+      llmResponse.sql
     );
     debugInfo.execution = { durationMs, result: executionResult };
     debugInfo.totalDurationMs = Date.now() - startTime;
 
     const responsePayload = {
       prompt,
-      sql: deepseekResponse.sql,
-      rawModelOutput: deepseekResponse.rawContent,
+      sql: llmResponse.sql,
+      rawModelOutput: llmResponse.rawContent,
       executionResult,
       schemaSource,
-      usage: deepseekResponse.usage || undefined,
+      usage: llmResponse.usage || undefined,
+      provider: useProvider,
+      model:
+        typeof requestedModel === "string" && requestedModel.trim()
+          ? requestedModel.trim()
+          : config.model || undefined,
     };
 
     if (getIsDebugMode()) {
@@ -132,11 +158,11 @@ export async function generateHandler(req, res) {
       };
     }
 
-    if (deepseekResponse.usage) {
+    if (llmResponse.usage) {
       updateUsageCsv({
-        promptTokens: deepseekResponse.usage.prompt_tokens,
-        completionTokens: deepseekResponse.usage.completion_tokens,
-        totalTokens: deepseekResponse.usage.total_tokens,
+        promptTokens: llmResponse.usage.prompt_tokens,
+        completionTokens: llmResponse.usage.completion_tokens,
+        totalTokens: llmResponse.usage.total_tokens,
         schemaSource,
       });
     }

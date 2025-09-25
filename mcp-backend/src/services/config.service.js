@@ -12,6 +12,18 @@ const DEFAULT_CONFIG = {
   system_prompt:
     "You are an expert SQL engineer. Receive natural language questions together with the database schema and reply with a SQL statement that can be executed directly against the database. Output only the SQL statement without explanations or markdown fences. Use the schema exactly as provided.",
   schema: "",
+  model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+  defaultProvider: "deepseek",
+  providers: {
+    deepseek: {
+      apiBase: process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com",
+      apiKey: process.env.DEEPSEEK_API_KEY || "",
+      model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+    },
+    custom: {
+      apiBase: process.env.CUSTOM_API_BASE || "",
+    },
+  },
 };
 
 export function getConfig() {

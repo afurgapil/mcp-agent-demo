@@ -24,14 +24,19 @@ function extractSqlFromText(text) {
   return withoutLabel.trim();
 }
 
-export async function callDeepseekForSql({ userPrompt, schema, systemPrompt }) {
+export async function callDeepseekForSql({
+  userPrompt,
+  schema,
+  systemPrompt,
+  model,
+}) {
   const messages = [
     { role: "system", content: systemPrompt.trim() },
     { role: "user", content: buildUserMessage(userPrompt, schema) },
   ];
 
   const body = {
-    model: DEEPSEEK_MODEL,
+    model: model || DEEPSEEK_MODEL,
     messages,
     temperature: 0,
     stream: false,

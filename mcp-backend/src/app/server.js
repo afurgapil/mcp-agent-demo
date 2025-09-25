@@ -2,13 +2,14 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import routes from "../routes/index.js";
-import { handleOptions } from "../utils/response.js";
 
 export function createApp() {
   const app = express();
+  app.set("etag", false);
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
-  app.use(morgan("dev"));
+  // Remove request logging in production
+  // app.use(morgan("dev"));
 
   // Express 5 + cors middleware handle preflight; no need for a wildcard OPTIONS route
 

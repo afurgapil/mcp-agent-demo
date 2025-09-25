@@ -30,5 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-mcp-backend/deepseek_usage.csv
-mcp-backend/schema.summary.json
+
+
+
+mcp-backend/reports/deepseek_usage.csv
+mcp-backend/config.json
+mcp-backend/reports/schema.summary.json

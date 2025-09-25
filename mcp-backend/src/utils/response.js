@@ -2,6 +2,9 @@ export function sendJSON(res, status, body, headers = {}) {
   const text = JSON.stringify(body);
   res.set({
     "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers":
       "Content-Type, Authorization, X-Requested-With",
