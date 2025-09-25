@@ -61,6 +61,7 @@ export default function Home() {
   });
   const provider = useMemo(() => {
     if (model === "custom") return "custom";
+    if (model?.startsWith("gemini")) return "gemini";
     return "deepseek";
   }, [model]);
 
@@ -397,6 +398,7 @@ export default function Home() {
                 <option value="">Default</option>
                 <option value="deepseek-chat">deepseek-chat</option>
                 <option value="deepseek-reasoner">deepseek-reasoner</option>
+                <option value="gemini-1.5-pro">gemini-1.5-pro</option>
                 <option value="custom">Custom</option>
               </select>
               <button

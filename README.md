@@ -12,17 +12,15 @@
 
 ## Overview
 
-MCP Agent Demo is a cutting-edge natural language to SQL platform that combines AI-powered query planning with Model Context Protocol (MCP) integration. Simply type what you want to do in plain English, and the AI will plan the necessary tools, execute SQL queries, and present the results in a beautiful interface.
+MCP Agent Demo is a natural language to SQL platform with Model Context Protocol (MCP) integration. You can choose an AI provider (Deepseek, Gemini, or a custom GGUF API), generate SQL from natural language, execute via MCP, and view results in a clean UI.
 
 ### Key Features
 
-- **AI-Powered Planning**: Google Gemini AI translates natural language to SQL operations
-- **Real-time Execution**: Instant query planning and execution with live updates
-- **MCP Integration**: Seamless integration with Model Context Protocol toolbox
-- **Modern UI**: Clean, responsive interface built with Next.js and Tailwind CSS
-- **Visual Results**: Beautiful display of query results and execution steps
-- **Live Streaming**: Server-Sent Events for real-time progress updates
-- **Tool Management**: Dynamic tool discovery and execution via MCP
+- **Multiple Providers**: Deepseek, Gemini (Google AI Studio), or Custom GGUF HTTP API
+- **SQL Generation**: Natural language → SQL using your selected provider
+- **MCP Integration**: Execute SQL via MCP toolbox tools
+- **Modern UI**: Next.js + Tailwind, clean and responsive
+- **Reports**: Usage and schema summaries under `mcp-backend/reports/`
 
 ## Architecture
 
@@ -30,31 +28,28 @@ MCP Agent Demo is a cutting-edge natural language to SQL platform that combines 
 sequenceDiagram
     participant UI as Web UI (Next.js)
     participant BE as Backend (Node.js)
-    participant LLM as Gemini LLM
+    participant LLM as Provider (Deepseek/Gemini/Custom)
     participant MCP as MCP Toolbox
     participant DB as MySQL
 
-    UI->>BE: POST /nl
-    BE->>LLM: plan
-    BE->>MCP: tools/call (SSE)
-    MCP->>DB: SQL query
+    UI->>BE: POST /api/generate {prompt, provider, model?}
+    BE->>LLM: Generate SQL
+    BE->>MCP: Execute SQL
+    MCP->>DB: Run query
     DB-->>MCP: results
     MCP-->>BE: results
-    BE-->>UI: summary
+    BE-->>UI: payload + debug (optional)
 ```
 
 ### Frontend
 
 - **Next.js 15** with App Router
-- **TypeScript** for type safety
-- **Tailwind CSS** for styling
-- **Server-Sent Events** for real-time updates
-- **Internationalization** support with next-intl
+- **TypeScript**, **Tailwind CSS**
 
 ### Backend
 
 - **Node.js 18+** with ES modules
-- **Google Gemini AI** for natural language processing
+- **Providers**: Deepseek, Gemini (Google AI), Custom GGUF API
 - **MCP SDK** for tool integration
 - **RESTful API** with proper error handling
 
@@ -97,14 +92,23 @@ Access the toolbox UI at: `http://127.0.0.1:5000/ui`
 Create a `.env` file in `mcp-backend/`:
 
 ```env
-# Google AI Studio / Gemini API
+# Gemini (optional)
 GEMINI_API_KEY=your_google_ai_api_key_here
+GEMINI_MODEL=gemini-1.5-pro
 
-# MCP Toolbox Configuration
+# Deepseek (optional)
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+DEEPSEEK_API_BASE=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+
+# Custom GGUF API (optional)
+CUSTOM_API_BASE=http://192.168.1.113:8000
+
+# MCP Toolbox
 MCP_TOOLBOX_URL=http://127.0.0.1:5000
 MCP_SSE_PATH=/sse
 
-# Server Configuration
+# Server
 PORT=3001
 ```
 
@@ -138,11 +142,11 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Detailed Setup
 
-### AI Integration Setup
+### Provider Setup
 
-1. Get API key from [Google AI Studio](https://aistudio.google.com/)
-2. Add `GEMINI_API_KEY` to your backend `.env`
-3. Restart the backend server
+- Gemini: set `GEMINI_API_KEY` (and optional `GEMINI_MODEL`)
+- Deepseek: set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, `DEEPSEEK_API_BASE`)
+- Custom GGUF: set `CUSTOM_API_BASE` or update via `PUT /api/config`
 
 ### MCP Toolbox Configuration
 
@@ -160,72 +164,14 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 3. Fill in your database connection details
 4. Keep `tools.yaml` out of git for security
 
-## Usage
-
-### Natural Language Queries
-
-Simply type what you want to do in your selected language (English, Turkish, or German):
-
-**Examples:**
-
-**English:**
-
-- "Copy the last row from urls into last_element (create if missing)."
-- "Show me all users created in the last week."
-
-**Turkish:**
-
-- "urls tablosundaki son satırı last_element tablosuna kopyala (yoksa oluştur)."
-- "Geçen hafta oluşturulan tüm kullanıcıları göster."
-
-**German:**
-
-- "Kopiere die letzte Zeile aus urls in last_element (erstellen falls nicht vorhanden)."
-- "Zeige mir alle Benutzer, die in der letzten Woche erstellt wurden."
-
-### Understanding the Results
-
-The interface displays:
-
-1. **Plan**: AI-generated tool selection and arguments
-2. **Steps**: Real-time execution of each tool call
-3. **Summary**: Final results and execution summary
-
-### Available Endpoints
-
-#### Backend API
-
-- **GET /tools** - List all available MCP tools
-- **POST /tool** - Execute a specific tool with arguments
-- **POST /nl** - Process natural language query
-
-#### Example API Usage
-
-```bash
-# List available tools
-curl http://localhost:3001/tools
-
-# Execute a specific tool
-curl -X POST http://localhost:3001/tool \
-  -H "Content-Type: application/json" \
-  -d '{"name": "sql_query", "args": {"query": "SELECT * FROM users"}}'
-
-# Natural language query
-curl -X POST http://localhost:3001/nl \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Show me all users"}'
-```
-
 ## Features Deep Dive
 
-### AI-Powered Query Planning
+### SQL Generation
 
-The platform uses Google Gemini AI to:
+The platform uses the selected provider to:
 
-- **Understand Intent**: Parse natural language queries
-- **Plan Tools**: Select appropriate MCP tools for the task
-- **Generate Arguments**: Create proper tool arguments
-- **Provide Rationale**: Explain the reasoning behind tool selection
+- **Generate SQL** from natural language
+- **Execute** via MCP toolbox (e.g., `mysql_execute_sql`)
 
 ### MCP Integration
 
@@ -246,17 +192,27 @@ The platform uses Google Gemini AI to:
 ### Project Structure
 
 ```
-├── mcp-backend/             # Backend Node.js API
-│   ├── index.js             # Main server file
-│   ├── package.json         # Backend dependencies
-│   └── .env                 # Backend configuration
-├── mcp-ui/                  # Frontend Next.js app
+├── mcp-backend/                 # Backend Node.js API
+│   ├── index.js                 # Server bootstrap (Express)
 │   ├── src/
-│   │   ├── app/             # Next.js App Router pages
-│   │   ├── i18n/            # Internationalization
-│   │   └── messages/        # Translation files
-│   ├── package.json         # Frontend dependencies
-│   └── .env.local           # Frontend configuration
+│   │   ├── app/                 # Express app factory
+│   │   │   └── server.js
+│   │   ├── controllers/         # Route handlers (health, debug, tools, config, generate)
+│   │   ├── routes/              # Route modules (health, debug, tools, config, generate)
+│   │   ├── services/            # Core services (mcp, schema, config, deepseek, custom, gemini)
+│   │   └── utils/               # Utilities (response helpers, etc.)
+│   ├── reports/                 # Reports (schema.summary.json, deepseek_usage.csv)
+│   ├── scripts/                 # Helper scripts (e.g., generate-mysql-schema.js)
+│   ├── package.json             # Backend dependencies
+│   └── .env                     # Backend configuration
+├── mcp-ui/                      # Frontend Next.js app
+│   ├── src/
+│   │   ├── app/                 # Next.js App Router pages
+│   │   ├── components/          # UI components (DataTable, DebugJsonCard, ...)
+│   │   ├── services/            # API client (backend calls)
+│   │   └── utils/               # UI utilities (formatting, extractors)
+│   ├── package.json             # Frontend dependencies
+│   └── .env.local               # Frontend configuration
 ├── tools.yaml               # MCP tools configuration
 ├── tools.yaml.example       # Example tools configuration
 └── README.md               # This file
@@ -271,8 +227,7 @@ The platform uses Google Gemini AI to:
 ### Customizing the UI
 
 1. Modify components in `mcp-ui/src/`
-2. Update translations in `mcp-ui/src/messages/`
-3. Customize styling with Tailwind CSS
+2. Customize styling with Tailwind CSS
 
 ## License
 

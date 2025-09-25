@@ -2,6 +2,7 @@ import { sendJSON } from "../utils/response.js";
 import { getConfig, saveConfig } from "../services/config.service.js";
 import { callDeepseekForSql } from "../services/deepseek.service.js";
 import { callCustomForSql } from "../services/custom.service.js";
+import { callGeminiForSql } from "../services/gemini.service.js";
 import {
   tryLoadSchemaSummary,
   getAutoSchemaFromCache,
@@ -105,6 +106,16 @@ export async function generateHandler(req, res) {
             apiBase:
               config?.providers?.custom?.apiBase || process.env.CUSTOM_API_BASE,
           })
+        : useProvider === "gemini"
+        ? await callGeminiForSql({
+            userPrompt: prompt,
+            schema: schemaToUse,
+            systemPrompt: config.system_prompt,
+            model:
+              typeof requestedModel === "string" && requestedModel.trim()
+                ? requestedModel.trim()
+                : config?.providers?.gemini?.model || process.env.GEMINI_MODEL,
+          })
         : await callDeepseekForSql({
             userPrompt: prompt,
             schema: schemaToUse,
@@ -152,7 +163,7 @@ export async function generateHandler(req, res) {
         deepseek: {
           request: debugInfo.deepseek.request,
           response: debugInfo.deepseek.response,
-          usage: deepseekResponse.usage || null,
+          usage: llmResponse.usage || null,
         },
         execution: debugInfo.execution,
       };
