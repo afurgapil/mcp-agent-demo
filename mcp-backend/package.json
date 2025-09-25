@@ -5,9 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "schema:mysql": "node ./scripts/generate-mysql-schema.js > schema.summary.json"
+    "schema:mysql": "node ./scripts/generate-mysql-schema.js > reports/schema.summary.json"
   },
   "keywords": [],
   "author": "",
@@ -16,8 +16,14 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.18.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.2",
+    "express": "^5.1.0",
     "fs": "0.0.1-security",
+    "morgan": "^1.10.1",
     "mysql2": "^3.15.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

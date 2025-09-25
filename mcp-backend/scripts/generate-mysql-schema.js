@@ -9,9 +9,7 @@ async function main() {
     MYSQL_PASSWORD,
     MYSQL_DATABASE,
     SCHEMA_MINIFY = "true",
-    // örnekleme tabanlı ipuçlarını aç/kapat
     SCHEMA_SAMPLE_HINTS = "false",
-    // örneklem büyüklüğü ve tablo/sütun sınırları
     SCHEMA_SAMPLE_LIMIT = "50",
     SCHEMA_SAMPLE_TABLE_LIMIT = "8",
   } = process.env;
@@ -34,7 +32,6 @@ async function main() {
   try {
     const schemaName = MYSQL_DATABASE;
 
-    // Tables (with row count & engine)
     const [tablesRows] = await connection.execute(
       `SELECT TABLE_NAME, ENGINE, TABLE_ROWS
        FROM information_schema.TABLES
@@ -51,12 +48,11 @@ async function main() {
           row_count:
             typeof r.TABLE_ROWS === "number" && !Number.isNaN(r.TABLE_ROWS)
               ? r.TABLE_ROWS
-              : undefined, // InnoDB için yaklaşık değerdir
+              : undefined,
         },
       ])
     );
 
-    // Columns (enums, defaults, lengths/precision)
     const [columnsRows] = await connection.execute(
       `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE,
               COLUMN_KEY, COLUMN_DEFAULT,
@@ -67,7 +63,6 @@ async function main() {
       [schemaName]
     );
 
-    // Unique constraints (multi-column’ları da topla)
     const [uniqueRows] = await connection.execute(
       `SELECT tc.TABLE_NAME, tc.CONSTRAINT_NAME, kcu.COLUMN_NAME, kcu.ORDINAL_POSITION
        FROM information_schema.TABLE_CONSTRAINTS tc
@@ -104,7 +99,6 @@ async function main() {
       }
     }
 
-    // Foreign keys
     const [fkRows] = await connection.execute(
       `SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
        FROM information_schema.KEY_COLUMN_USAGE
@@ -123,7 +117,6 @@ async function main() {
       });
     }
 
-    // Indexes (from STATISTICS) — includes PK/UNIQUE/NON-UNIQUE
     const [indexRows] = await connection.execute(
       `SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME
        FROM information_schema.STATISTICS
@@ -146,7 +139,6 @@ async function main() {
       m.get(r.INDEX_NAME).columns.push(r.COLUMN_NAME);
     }
 
-    // Columns organized by table + enrich attributes
     const columnsByTable = new Map();
     for (const col of columnsRows) {
       if (!columnsByTable.has(col.TABLE_NAME))
@@ -176,34 +168,27 @@ async function main() {
           (col.DATA_TYPE === "enum" && parseEnumValues(col.COLUMN_TYPE)) ||
           undefined,
       };
-      // minify için undefinedları sonra ayıklarız
       columnsByTable.get(col.TABLE_NAME).push(out);
     }
 
-    // Build tables array
     const tables = [];
     for (const t of tableNames) {
-      // columns
       const rawCols = columnsByTable.get(t) || [];
       const columns = rawCols.map(stripUndef);
 
-      // fks
       const fks = (fksByTable.get(t) || []).map((f) => ({
         column: f.column,
         refTable: f.refTable,
         refColumn: f.refColumn,
       }));
 
-      // indexes
       const idxMap = indexesByTable.get(t);
       const indexes = idxMap
         ? Array.from(idxMap.values()).map(stripUndef)
         : undefined;
 
-      // multi-unique
       const multiU = multiColumnUnique.get(t);
 
-      // joins from FK
       const joins = (fksByTable.get(t) || []).map((f) => ({
         to: f.refTable,
         on: [`${t}.${f.column} = ${f.refTable}.${f.refColumn}`],
@@ -226,12 +211,10 @@ async function main() {
       tables.push(stripUndef(tableEntry));
     }
 
-    // OPTIONAL: sample-driven value join hints (for text columns)
     if (SCHEMA_SAMPLE_HINTS.toLowerCase() === "true") {
       const limit = Number(SCHEMA_SAMPLE_LIMIT) || 50;
       const tableLimit = Math.max(1, Number(SCHEMA_SAMPLE_TABLE_LIMIT) || 8);
 
-      // Pick a subset of tables to avoid heavy scans (prioritize smaller ones by row_count)
       const picked = [...tables]
         .sort((a, b) => (a.row_count ?? 0) - (b.row_count ?? 0))
         .slice(0, tableLimit);
@@ -260,7 +243,6 @@ async function main() {
           const B = tablesArr[j];
 
           for (const colA of textCols[A]) {
-            // örneklem al
             const sampleVals = await sampleDistinct(
               connection,
               schemaName,
@@ -270,7 +252,6 @@ async function main() {
             );
             if (!sampleVals.length) continue;
 
-            // B’deki her metin kolona karşı basit örtüşme say
             for (const colB of textCols[B]) {
               const matchCount = await countMatches(
                 connection,
@@ -294,14 +275,12 @@ async function main() {
       }
 
       if (hints.length) {
-        // en alakalıları üstte (match yoğunluğu büyükten küçüğe)
         hints.sort(
           (a, b) =>
             b.sample.matched / b.sample.checked -
             a.sample.matched / a.sample.checked
         );
-        // Şemanın üst seviyesine ekleyeceğiz
-        var valueJoinHints = hints.slice(0, 20); // aşırı kalabalıklaşmasın
+        var valueJoinHints = hints.slice(0, 20);
       }
     }
 
@@ -346,10 +325,8 @@ function stripUndef(obj) {
 }
 
 function parseEnumValues(columnType) {
-  // COLUMN_TYPE like: enum('a','b','c')
   if (!columnType || !columnType.startsWith("enum(")) return null;
-  const inside = columnType.slice(5, -1); // remove enum( ... )
-  // split by comma not inside quotes – but MySQL enums use simple quoted list; basic split works
+  const inside = columnType.slice(5, -1);
   const parts = [];
   let curr = "";
   let inStr = false;
@@ -366,7 +343,6 @@ function parseEnumValues(columnType) {
     }
   }
   if (curr) parts.push(curr.trim());
-  // strip quotes
   return parts
     .map((p) => (p.startsWith("'") && p.endsWith("'") ? p.slice(1, -1) : p))
     .map((s) => s.replace(/\\'/g, "'"));
@@ -383,7 +359,6 @@ async function sampleDistinct(conn, schema, table, column, limit) {
 
 async function countMatches(conn, schema, table, column, values) {
   if (!values.length) return 0;
-  // Use IN with parameter placeholders
   const placeholders = values.map(() => "?").join(",");
   const q = `SELECT COUNT(*) AS c
              FROM \`${schema}\`.\`${table}\`
