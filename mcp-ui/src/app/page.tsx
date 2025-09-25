@@ -231,7 +231,10 @@ export default function Home() {
       const data = await apiFetchConfig(
         model === "custom" ? "custom" : "deepseek"
       );
-      setConfig(data);
+      setConfig({
+        system_prompt: data.system_prompt,
+        schema: data.schema || "",
+      });
       if (!model && typeof (data as { model?: string })?.model === "string") {
         setModel(((data as { model?: string }).model as string) || "");
       }

@@ -33,6 +33,5 @@ pnpm-debug.log*
 
 
 
-mcp-backend/reports/deepseek_usage.csv
 mcp-backend/config.json
-mcp-backend/reports/schema.summary.json
+mcp-backend/reports/*

@@ -1,18 +1,33 @@
 const { CUSTOM_API_BASE } = process.env;
 
-function buildUserMessage(userPrompt, schema) {
-  if (schema && schema.trim()) {
-    return `Database schema:\n${schema.trim()}\n\nUser request:\n${userPrompt.trim()}`;
-  }
+function buildUserMessage(userPrompt) {
   return userPrompt.trim();
 }
 
 function extractSqlFromText(text) {
   if (!text) return "";
-  const fenceMatch = text.match(/```(?:sql)?\s*([\s\S]*?)```/i);
-  const raw = fenceMatch ? fenceMatch[1] : text;
-  const withoutLabel = raw.replace(/^SQL\s*[:\-]\s*/i, "");
-  return withoutLabel.trim();
+  // 1) Prefer explicit channel markers at the end like: "final|> ..." or "message|> ..."
+  const channelMatch = text.match(/(?:final\|>|message\|>)\s*([\s\S]*)$/i);
+  let candidate = channelMatch ? channelMatch[1] : null;
+
+  // Normalize: strip leading section labels such as "SQL:", "Query:", etc.
+  let normalized = candidate.replace(/^\s*(SQL|Query|Sorgu)\s*[:\-]\s*/i, "");
+
+  // If multiple statements or trailing explanations exist, keep only up to first semicolon
+  const semicolonIndex = normalized.indexOf(";");
+  const truncated =
+    semicolonIndex >= 0 ? normalized.slice(0, semicolonIndex + 1) : normalized;
+
+  // Final cleanup: remove code block adornments, markdown headers, comments, backticks; then trim
+  const cleaned = truncated
+    .replace(/```/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/^\s*--.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[`\s]+|[`\s]+$/g, "")
+    .trim();
+
+  return cleaned;
 }
 
 export async function callCustomForSql({
@@ -31,12 +46,7 @@ export async function callCustomForSql({
 
   const endpoint = new URL("/api/generate", base).toString();
   const body = {
-    message: buildUserMessage(userPrompt, schema),
-    // Defaults per swagger; can be omitted or customized later
-    max_tokens: 300,
-    temperature: 0.7,
-    top_p: 0.95,
-    repeat_penalty: 1.1,
+    message: buildUserMessage(userPrompt),
   };
 
   const res = await fetch(endpoint, {
