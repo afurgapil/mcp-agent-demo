@@ -306,7 +306,7 @@ export default function Home() {
       return true;
     } catch (err: unknown) {
       setConfigError(
-        err instanceof Error ? err.message : "Configuration kaydetme hatası"
+        err instanceof Error ? err.message : "Failed to save configuration"
       );
       return false;
     } finally {
@@ -319,7 +319,7 @@ export default function Home() {
 
     // Validation: query must be provided
     if (!query.trim()) {
-      setError("Lütfen sorgu girin");
+      setError("Please enter a query");
       return;
     }
 
@@ -350,7 +350,7 @@ export default function Home() {
       );
     } catch (err: unknown) {
       const errorMessage =
-        err instanceof Error ? err.message : "İstek başarısız oldu";
+        err instanceof Error ? err.message : "Request failed";
 
       // Handle specific configuration service errors more gracefully
       if (
@@ -358,7 +358,7 @@ export default function Home() {
         err.message.includes("Configuration service")
       ) {
         setError(
-          "Sistem konfigürasyonu şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin."
+          "System configuration is currently unavailable. Please try again later."
         );
       } else {
         setError(errorMessage);
@@ -429,10 +429,10 @@ export default function Home() {
                     <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin mr-2"></div>
                   ))}
                 {loading || configLoading
-                  ? "Çalışıyor"
+                  ? "Processing"
                   : hasResults
-                  ? "✅ Hazır"
-                  : "⚫ Boşta"}
+                  ? "✅ Ready"
+                  : "⚫ Idle"}
               </div>
             </div>
           </div>
@@ -632,7 +632,7 @@ function ExecutionResultCard({
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white/70 dark:bg-zinc-900/50 shadow md:col-span-2">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium">SQL Çalıştırma Sonucu</h2>
+        <h2 className="font-medium">SQL Execution Result</h2>
         <div className="flex gap-2 text-xs">
           <button
             onClick={() => setTab("table")}
@@ -642,7 +642,7 @@ function ExecutionResultCard({
                 : "bg-gray-200 dark:bg-gray-800"
             }`}
           >
-            Tablo
+            Table
           </button>
           <button
             onClick={() => setTab("json")}
@@ -658,13 +658,13 @@ function ExecutionResultCard({
       </div>
       <div className="mt-3">
         {loading ? (
-          <div className="text-sm text-gray-500">Yükleniyor...</div>
+          <div className="text-sm text-gray-500">Loading...</div>
         ) : tab === "table" ? (
           rows.length > 0 ? (
             <DataTable rows={rows} />
           ) : (
             <div className="text-xs text-gray-500">
-              Gösterilecek tablo verisi yok
+              No table data to display
             </div>
           )
         ) : (
@@ -691,18 +691,18 @@ function SqlCard({
   return (
     <div className="rounded-2xl border border-blue-500/30 bg-blue-600/10 p-4 shadow-md">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-semibold text-blue-100">Üretilen SQL</h2>
+        <h2 className="text-sm font-semibold text-blue-100">Generated SQL</h2>
         <button
           className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-100 border border-blue-500/40 hover:bg-blue-500/30"
           onClick={() => navigator.clipboard?.writeText(sql)}
           disabled={loading}
         >
-          Kopyala
+          Copy
         </button>
       </div>
       {sourceLabel && (
         <div className="text-xs text-blue-200 mb-2">
-          Şema kaynağı: {sourceLabel}
+          Schema source: {sourceLabel}
         </div>
       )}
       <pre className="bg-blue-900/30 border border-blue-700/40 rounded p-3 text-xs whitespace-pre-wrap break-words text-blue-100">
@@ -716,7 +716,7 @@ function ModelOutputCard({ output }: { output: string }) {
   return (
     <div className="rounded-2xl border border-purple-500/30 bg-purple-600/10 p-4 shadow-md">
       <h2 className="text-sm font-semibold text-purple-100 mb-2">
-        Model Çıktısı
+        Model Output
       </h2>
       <pre className="bg-purple-900/30 border border-purple-700/40 rounded p-3 text-xs whitespace-pre-wrap break-words text-purple-100">
         {output}
@@ -860,7 +860,7 @@ function StepResultViewer({ result }: { result: unknown }) {
               : "bg-gray-200 dark:bg-gray-800"
           }`}
         >
-          Tablo
+          Table
         </button>
         <button
           onClick={() => setTab("json")}
@@ -878,7 +878,7 @@ function StepResultViewer({ result }: { result: unknown }) {
           }
           className="ml-auto px-2 py-1 rounded bg-gray-100 dark:bg-gray-800 hover:brightness-105"
         >
-          Kopyala
+          Copy
         </button>
       </div>
       <div className="mt-2">
@@ -887,7 +887,7 @@ function StepResultViewer({ result }: { result: unknown }) {
             <DataTable rows={rows} />
           ) : (
             <div className="text-xs text-gray-500">
-              Gösterilecek tablo verisi yok
+              No table data to display
             </div>
           )
         ) : (
@@ -917,7 +917,7 @@ function DebugPanel({
           </h3>
           {typeof debug.totalDurationMs === "number" && (
             <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
-              {debug.totalDurationMs}ms toplam
+              {debug.totalDurationMs}ms total
             </span>
           )}
           {debug.mode && (
@@ -928,13 +928,13 @@ function DebugPanel({
         </div>
         <button
           onClick={() => {
-            if (confirm("Debug verilerini temizlemek istiyor musunuz?")) {
+            if (confirm("Do you want to clear the debug data?")) {
               onClearDebug?.();
             }
           }}
           className="text-xs px-3 py-1 bg-red-900/40 text-red-300 border border-red-700/50 rounded-lg hover:bg-red-900/60 transition-colors"
         >
-          🗑️ Temizle
+          🗑️ Clear
         </button>
       </div>
 
@@ -945,12 +945,12 @@ function DebugPanel({
             open
           >
             <summary className="cursor-pointer text-sm text-zinc-200">
-              Şema Bilgisi
+              Schema Details
             </summary>
             <div className="mt-2 text-xs text-zinc-300 space-y-1">
               {debug.schema.source && (
                 <div>
-                  Kaynak:{" "}
+                  Source:{" "}
                   <span className="text-zinc-100">
                     {schemaSourceLabel(debug.schema.source)}
                   </span>
@@ -958,9 +958,9 @@ function DebugPanel({
               )}
               {typeof debug.schema.length === "number" && (
                 <div>
-                  Uzunluk:{" "}
+                  Length:{" "}
                   <span className="text-zinc-100">{debug.schema.length}</span>{" "}
-                  karakter
+                  characters
                 </div>
               )}
             </div>
@@ -1009,7 +1009,7 @@ function DebugPanel({
           <div className="mt-2 space-y-2">
             {typeof debug.execution?.durationMs === "number" && (
               <div className="text-xs text-zinc-400">
-                Süre:{" "}
+                Duration:{" "}
                 <span className="text-zinc-200">
                   {debug.execution.durationMs}ms
                 </span>
@@ -1021,7 +1021,7 @@ function DebugPanel({
 
         <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3">
           <summary className="cursor-pointer text-sm text-zinc-200">
-            Tam Debug İçeriği
+            Full Debug Payload
           </summary>
           <div className="mt-2">
             <DebugJsonCard title="Debug" value={debug} />
@@ -1095,7 +1095,7 @@ function ConfigurationPanel({
   if (loading && !config) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-zinc-400">Configuration yükleniyor...</div>
+        <div className="text-zinc-400">Loading configuration...</div>
       </div>
     );
   }
@@ -1104,7 +1104,7 @@ function ConfigurationPanel({
     return (
       <div className="flex items-center justify-center py-12">
         <div className="text-zinc-400">
-          Konfigürasyon servisi şu anda kullanılamıyor.
+          The configuration service is currently unavailable.
         </div>
       </div>
     );
@@ -1114,7 +1114,7 @@ function ConfigurationPanel({
     <div className="space-y-6">
       {error && (
         <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm">
-          Hata: {error}
+          Error: {error}
         </div>
       )}
 
@@ -1126,32 +1126,32 @@ function ConfigurationPanel({
           </label>
           <textarea
             className="w-full h-48 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
-            placeholder="AI asistanı için sistem talimatları girin..."
+            placeholder="Enter system instructions for the AI assistant..."
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             disabled={loading}
           />
           <p className="text-xs text-zinc-400 mt-1">
-            AI modeline verilen sistem talimatları. SQL sorgusu oluştururken bu
-            kurallara uyar.
+            System instructions provided to the AI model. It follows these rules
+            when generating SQL queries.
           </p>
         </div>
 
         {/* Database Schema */}
         <div>
           <label className="block text-sm font-medium mb-2 text-zinc-100">
-            Veritabanı Şeması
+            Database Schema
           </label>
           <textarea
             className="w-full h-64 rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm font-mono"
-            placeholder="CREATE TABLE statements ve database schema..."
+            placeholder="CREATE TABLE statements and database schema..."
             value={schema}
             onChange={(e) => setSchema(e.target.value)}
             disabled={loading}
           />
           <p className="text-xs text-zinc-400 mt-1">
-            Varsayılan veritabanı şeması. AI bu şemayı kullanarak SQL sorguları
-            oluşturur.
+            Default database schema. The AI uses this schema to generate SQL
+            queries.
           </p>
         </div>
       </div>
@@ -1163,19 +1163,19 @@ function ConfigurationPanel({
           className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110 transition"
           disabled={loading || !hasChanges}
         >
-          {loading ? "Kaydediliyor..." : "Kaydet"}
+          {loading ? "Saving..." : "Save"}
         </button>
         <button
           onClick={handleReset}
           className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 transition"
           disabled={loading || !hasChanges}
         >
-          Sıfırla
+          Reset
         </button>
         <div className="flex-1" />
         {hasChanges && (
           <span className="text-xs text-amber-400 self-center">
-            Kaydedilmemiş değişiklikler var
+            There are unsaved changes
           </span>
         )}
       </div>
@@ -1300,7 +1300,7 @@ function ToolsPanel({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-zinc-400">Araçlar yükleniyor...</div>
+        <div className="text-zinc-400">Loading tools...</div>
       </div>
     );
   }
@@ -1311,11 +1311,11 @@ function ToolsPanel({
       <div className="flex items-center justify-between">
         <div className="space-y-2">
           <h2 className="text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
-            🔧 Mevcut Araçlar
+            🔧 Available Tools
           </h2>
           <p className="text-sm text-zinc-400 flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-            {tools.length} araç mevcut
+            {tools.length} tools available
           </p>
         </div>
         <button
@@ -1329,7 +1329,7 @@ function ToolsPanel({
             ) : (
               "🔄"
             )}
-            Yenile
+            Refresh
           </span>
         </button>
       </div>
@@ -1337,7 +1337,7 @@ function ToolsPanel({
       {error && (
         <div className="rounded-2xl border border-red-500/30 bg-gradient-to-r from-red-500/10 to-pink-500/10 backdrop-blur-sm text-red-300 p-4 text-sm shadow-lg">
           <span className="flex items-center gap-2">
-            ⚠️ <strong>Hata:</strong> {error}
+            ⚠️ <strong>Error:</strong> {error}
           </span>
         </div>
       )}
@@ -1347,7 +1347,7 @@ function ToolsPanel({
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
             <span className="w-3 h-3 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full"></span>
-            Araç Kategorileri
+            Tool Categories
           </h3>
           <div className="space-y-4 max-h-96 overflow-y-auto tools-scroll">
             {Object.entries(categorizedTools).map(
@@ -1375,7 +1375,7 @@ function ToolsPanel({
                           </span>
                           {expandedCategories.has(category) && (
                             <span className="text-xs text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">
-                              Açık
+                              Expanded
                             </span>
                           )}
                         </div>
@@ -1417,7 +1417,7 @@ function ToolsPanel({
                               <div className="flex items-center gap-1">
                                 <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
                                 <span className="text-xs text-blue-300">
-                                  Seçili
+                                  Selected
                                 </span>
                               </div>
                             )}
@@ -1446,7 +1446,7 @@ function ToolsPanel({
                       {selectedToolData.name}
                     </h3>
                     <span className="text-xs text-zinc-400 bg-zinc-700/50 px-2 py-1 rounded-full">
-                      Aktif Tool
+                      Active Tool
                     </span>
                   </div>
                 </div>
@@ -1462,7 +1462,7 @@ function ToolsPanel({
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
                     <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
-                    Parametreler
+                    Parameters
                   </h4>
                   <div className="space-y-4 max-h-80 overflow-y-auto category-scroll">
                     {Object.entries(
@@ -1475,14 +1475,14 @@ function ToolsPanel({
                             key
                           ) && (
                             <span className="text-red-400 text-xs bg-red-500/20 px-2 py-1 rounded-full border border-red-500/30">
-                              Zorunlu *
+                              Required *
                             </span>
                           )}
                         </label>
                         <input
                           type="text"
                           className="w-full rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 shadow-lg transition-all duration-300"
-                          placeholder={`${key} değeri girin...`}
+                          placeholder={`Enter a value for ${key}...`}
                           value={String(toolParams[key] || "")}
                           onChange={(e) =>
                             handleParamChange(key, e.target.value)
@@ -1516,11 +1516,11 @@ function ToolsPanel({
                   {executing ? (
                     <>
                       <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Çalıştırılıyor...
+                      Running...
                     </>
                   ) : (
                     <>
-                      🚀 <span>Aracı Çalıştır</span>
+                      🚀 <span>Run Tool</span>
                     </>
                   )}
                 </span>
@@ -1531,7 +1531,7 @@ function ToolsPanel({
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-zinc-200 flex items-center gap-2">
                     <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-                    Sonuç
+                    Result
                   </h4>
                   <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 backdrop-blur-sm shadow-xl">
                     <div className="p-6 max-h-96 overflow-y-auto tools-scroll">
@@ -1547,9 +1547,9 @@ function ToolsPanel({
                 <span className="text-3xl">🛠️</span>
               </div>
               <div className="text-center space-y-2">
-                <p className="text-lg font-medium text-zinc-300">Araç Seçin</p>
+                <p className="text-lg font-medium text-zinc-300">Select a Tool</p>
                 <p className="text-sm text-zinc-500">
-                  Sol taraftan bir araç seçerek başlayın
+                  Start by selecting a tool from the left
                 </p>
               </div>
             </div>

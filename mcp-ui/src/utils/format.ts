@@ -33,15 +33,15 @@ export function schemaSourceLabel(source?: string | null): string | null {
   if (!source) return null;
   switch (source) {
     case "custom":
-      return "Kullanıcı isteği";
+      return "User request";
     case "config":
-      return "Konfigürasyon";
+      return "Configuration";
     case "fetched":
-      return "MCP'den otomatik";
+      return "Automatically fetched from MCP";
     case "cache":
-      return "MCP önbelleği";
+      return "MCP cache";
     case "none":
-      return "Belirtilmedi";
+      return "Not specified";
     default:
       return source;
   }

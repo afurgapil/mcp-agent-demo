@@ -50,6 +50,6 @@ export function saveConfig(newConfig) {
     return updated;
   } catch (err) {
     console.error("Error saving config file:", err.message);
-    throw new Error("Configuration kaydetme hatası");
+    throw new Error("Failed to save configuration");
   }
 }
