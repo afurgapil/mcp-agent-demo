@@ -1,34 +1,42 @@
 MCP Agent Demo — Node.js HTTP API
 
 Overview
+
 - Exposes three endpoints to interact with an MCP Toolbox via Gemini planning:
   - GET /tools — list available tools
   - POST /tool — call a tool manually with args
   - POST /nl — natural-language query → Gemini plan → MCP tool → summary
 
 Requirements
+
 - Node.js 18+ (uses built-in fetch)
 - An MCP Toolbox running with HTTP endpoints at /tools and /call/:name
 - Google AI Studio API key
 
 Setup
-1) Configure .env
-   - GEMINI_API_KEY=...   # required
-   - MCP_TOOLBOX_URL=...  # required, e.g. http://127.0.0.1:5000
-   - PORT=3000            # optional
 
-2) Install dependencies
+1. Configure .env
+
+   - GEMINI_API_KEY=... # required
+   - MCP_TOOLBOX_URL=... # required, e.g. http://127.0.0.1:5000
+   - PORT=3000 # optional
+
+2. Install dependencies
+
    - npm i
 
-3) Run
+3. Run
    - npm run dev
    - or: npm start
 
 Endpoints
+
 - GET /tools
+
   - Response: { tools: Tool[] }
 
 - POST /tool
+
   - Body: { name: string, args: object }
   - Response: { result: any }
 
@@ -38,6 +46,50 @@ Endpoints
   - Response: { plan: {tool,args,rationale}, result: any, summary: string }
 
 Notes
+
 - Security: All tools are allowed by default. If you need an allowlist, you can add it later.
 - Error handling: The server returns JSON errors with proper status codes.
 - Gemini output parsing: The planner prompts Gemini to return strict JSON; code fences are stripped if present.
+
+MySQL minimal schema generator
+
+- Purpose: produce a compact JSON schema (tables, columns, PK, single-column UNIQUE, FKs) for low-token prompts.
+- Dependency: mysql2
+
+Env vars (required)
+
+- MYSQL_HOST (default 127.0.0.1)
+- MYSQL_PORT (default 3306)
+- MYSQL_USER
+- MYSQL_PASSWORD
+- MYSQL_DATABASE
+- SCHEMA_MINIFY=true|false (default true)
+
+Usage
+
+1. Install deps: npm i
+2. Set env (e.g. via .env)
+3. Run:
+   npm run schema:mysql
+   # writes schema.summary.json in project root of this package
+
+Output shape (example)
+
+```json
+{
+  "version": "2025-09-25",
+  "dialect": "mysql",
+  "database": "exampledb",
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        { "name": "id", "type": "bigint", "pk": true },
+        { "name": "email", "type": "varchar", "unique": true },
+        { "name": "created_at", "type": "timestamp" }
+      ],
+      "fks": []
+    }
+  ]
+}
+```

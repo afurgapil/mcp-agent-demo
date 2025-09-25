@@ -4,16 +4,6 @@ import { useMemo, useState, useEffect } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3001";
 
-type Step = { tool: string; args?: Record<string, unknown> };
-type Plan = { steps?: Step[]; rationale?: string } & Partial<Step>;
-type StepResult = {
-  index: number;
-  tool: string;
-  args?: Record<string, unknown>;
-  result?: unknown;
-  error?: string;
-};
-
 type MCPResult = {
   content?: Array<{ text?: string }>;
   rows?: Array<Record<string, unknown>>;
@@ -103,49 +93,41 @@ function formatCell(v: unknown): string {
   }
 }
 
+function schemaSourceLabel(source?: string | null): string | null {
+  if (!source) return null;
+  switch (source) {
+    case "custom":
+      return "Kullanıcı isteği";
+    case "config":
+      return "Konfigürasyon";
+    case "fetched":
+      return "MCP'den otomatik";
+    case "cache":
+      return "MCP önbelleği";
+    case "none":
+      return "Belirtilmedi";
+    default:
+      return source;
+  }
+}
+
 // Debug panel types
 type DebugPayload = {
   mode?: string;
-  request?: {
-    endpoint?: string;
-    prompt?: string;
-    timestamp?: string;
+  totalDurationMs?: number;
+  deepseek?: {
+    request?: unknown;
+    response?: unknown;
   };
-  aiCalls?: Array<{
-    modelName: string;
-    input: unknown;
-    output: unknown;
-    duration: number;
-    timestamp: string;
-    metadata: Record<string, unknown>;
-  }>;
-  stages?: Array<{
-    stage: string;
-    timestamp: string;
-    data: unknown;
-  }>;
-  totalDuration?: number;
-  rawModelResponse?: unknown;
-  rawResponseText?: unknown;
-  toolSelectorUrl?: string;
-  toolsConsidered?: Array<{
-    name: string;
-    description?: string;
-    arguments?: Array<{
-      name: string;
-      type?: string;
-      required?: boolean;
-      description?: string;
-    }>;
-    hasAdditionalArguments?: boolean;
-  }>;
-};
-
-type SelectionResult = {
-  prompt: string;
-  tool: string | null;
-  reason?: string;
-  confidence?: number | null;
+  execution?: {
+    durationMs?: number;
+    result?: unknown;
+  };
+  schema?: {
+    source?: string;
+    length?: number;
+    snippet?: string;
+  };
 };
 
 export default function Home() {
@@ -153,16 +135,15 @@ export default function Home() {
   const [customSchema, setCustomSchema] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [plan, setPlan] = useState<Plan | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
-  const [execSteps, setExecSteps] = useState<StepResult[]>([]);
   const [raw, setRaw] = useState<unknown>(null);
-  const [selection, setSelection] = useState<SelectionResult | null>(null);
-  const hasResults = useMemo(() => !!selection, [selection]);
-  const finalStep = execSteps.length ? execSteps[execSteps.length - 1] : null;
-  const finalResult = finalStep?.result;
-  const [openPlan, setOpenPlan] = useState(true);
-  const [openSteps, setOpenSteps] = useState(true);
+  const [generatedSql, setGeneratedSql] = useState<string | null>(null);
+  const [modelOutput, setModelOutput] = useState<string | null>(null);
+  const [executionResult, setExecutionResult] = useState<unknown>(null);
+  const [schemaSource, setSchemaSource] = useState<string | null>(null);
+  const hasResults = useMemo(
+    () => !!generatedSql || executionResult != null,
+    [generatedSql, executionResult]
+  );
 
   // Debug panel state
   const [debugMode, setDebugMode] = useState(true);
@@ -345,7 +326,17 @@ export default function Home() {
       const res = await fetch(`${API_BASE.replace(/\/$/, "")}/tools`);
       if (res.ok) {
         const data = await res.json();
-        setTools(data.tools || []);
+        const normalized = (data.tools || []).map((tool: Record<string, unknown>) => {
+          const inputSchema =
+            (tool as Record<string, unknown>).inputSchema ||
+            (tool as Record<string, unknown>).input_schema ||
+            null;
+          return {
+            ...tool,
+            inputSchema,
+          };
+        });
+        setTools(normalized as typeof tools);
       } else {
         console.warn("Tools service unavailable");
         setTools([]);
@@ -438,11 +429,12 @@ export default function Home() {
 
     setLoading(true);
     setError(null);
-    setPlan(null);
-    setSummary(null);
     setRaw(null);
-    setExecSteps([]);
-    setSelection(null);
+    setGeneratedSql(null);
+    setExecutionResult(null);
+    setModelOutput(null);
+    setDebugData(null);
+    setSchemaSource(null);
     try {
       const res = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate`, {
         method: "POST",
@@ -451,7 +443,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           prompt: query,
-          max_tokens: 512,
+          schema: customSchema,
         }),
       });
       const data = await res.json();
@@ -463,19 +455,14 @@ export default function Home() {
           res.statusText;
         throw new Error(detailMessage);
       }
-      setPlan(data.plan ?? null);
-      setExecSteps(Array.isArray(data.steps) ? data.steps : []);
-      setSummary(data.summary ?? null);
       setRaw(data);
-
-      setSelection({
-        prompt: data.prompt || query,
-        tool: data.tool ?? null,
-        reason: data.reason,
-        confidence:
-          typeof data.confidence === "number" ? data.confidence : null,
-      });
+      setGeneratedSql(typeof data.sql === "string" ? data.sql : null);
+      setModelOutput(typeof data.rawModelOutput === "string" ? data.rawModelOutput : null);
+      setExecutionResult(data.executionResult ?? null);
       setDebugData(data.debug || null);
+      setSchemaSource(
+        typeof data.schemaSource === "string" ? data.schemaSource : null
+      );
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "İstek başarısız oldu";
@@ -653,24 +640,18 @@ CREATE TABLE students (
                     setQuery("");
                     setCustomSchema("");
                     setError(null);
-                    setPlan(null);
-                    setSummary(null);
                     setRaw(null);
-                    setExecSteps([]);
-                    setSelection(null);
+                    setGeneratedSql(null);
+                    setExecutionResult(null);
+                    setModelOutput(null);
                     setDebugData(null);
+                    setSchemaSource(null);
                   }}
                 >
                   <span className="flex items-center gap-2"> Temizle</span>
                 </button>
               </div>
             </form>
-            {selection && (
-              <SelectionCard
-                selection={selection}
-                loading={loading}
-              />
-            )}
           </div>
         )}
 
@@ -704,14 +685,6 @@ CREATE TABLE students (
           />
         )}
 
-        {/* Primary Result right under input - only show on query tab */}
-        {activeTab === "query" && finalResult ? (
-          <ResultCard
-            result={finalResult as Record<string, unknown>}
-            loading={loading}
-          />
-        ) : null}
-
         {/* Results section - only show on query tab */}
         {activeTab === "query" && (
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -720,83 +693,24 @@ CREATE TABLE students (
                 Error: {error}
               </div>
             )}
-            {false && (
-              <div className="rounded-xl w-full border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-                <header className="flex items-center justify-between px-4 py-3">
-                  <h2 className="font-medium">Plan</h2>
-                  <button
-                    onClick={() => setOpenPlan((v) => !v)}
-                    className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
-                  >
-                    {openPlan ? "Gizle" : "Göster"}
-                  </button>
-                </header>
-                {openPlan && (
-                  <div className="px-4 pb-4">
-                    {Array.isArray(plan?.steps) && plan!.steps!.length > 0 ? (
-                      <PlanRoadmap steps={plan!.steps as Step[]} />
-                    ) : (
-                      <div className="rounded bg-gray-50 dark:bg-gray-900 p-2 text-sm">
-                        Tek adımlı plan
-                      </div>
-                    )}
-                    {plan?.rationale && (
-                      <div className="mt-3 text-sm">
-                        <span className="font-semibold">Gerekçe: </span>
-                        {plan?.rationale}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+            {generatedSql && (
+              <SqlCard
+                sql={generatedSql}
+                loading={loading}
+                schemaSource={schemaSource}
+              />
             )}
-            {false && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-0 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-                <header className="flex items-center justify-between px-4 py-3">
-                  <h2 className="font-medium">Adımlar</h2>
-                  <button
-                    onClick={() => setOpenSteps((v) => !v)}
-                    className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800"
-                  >
-                    {openSteps ? "Gizle" : "Göster"}
-                  </button>
-                </header>
-                {openSteps && <StepTimeline steps={execSteps} />}
-              </div>
-            )}
-            {false && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
-                <h2 className="font-medium mb-2">Özet</h2>
-                <p className="text-sm whitespace-pre-wrap">{summary}</p>
-              </div>
-            )}
-            {/* AI Raw Response */}
-            {raw && (raw as Record<string, unknown>).sql ? (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-                <h3 className="text-sm font-medium mb-2">
-                  AI&apos;dan Gelen Response
-                </h3>
-                <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
-                  {String((raw as Record<string, unknown>).sql)}
-                </pre>
-              </div>
-            ) : null}
 
-            {/* SQL Execution Result */}
-            {raw && (raw as Record<string, unknown>).executionResult ? (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm">
-                <h3 className="text-sm font-medium mb-2">
-                  SQL Execution Result
-                </h3>
-                <pre className="bg-gray-50 dark:bg-gray-900 rounded p-2 whitespace-pre-wrap break-words text-xs">
-                  {JSON.stringify(
-                    (raw as Record<string, unknown>).executionResult,
-                    null,
-                    2
-                  )}
-                </pre>
-              </div>
-            ) : null}
+            {modelOutput && modelOutput !== generatedSql && (
+              <ModelOutputCard output={modelOutput} />
+            )}
+
+            {executionResult != null && (
+              <ExecutionResultCard
+                result={executionResult as Record<string, unknown>}
+                loading={loading}
+              />
+            )}
 
             {raw != null && (
               <details className="rounded-xl border border-gray-200 dark:border-gray-800 p-4 bg-white/60 dark:bg-zinc-900/40 shadow-sm md:col-span-2">
@@ -826,21 +740,19 @@ CREATE TABLE students (
   );
 }
 
-function ResultCard({
+function ExecutionResultCard({
   result,
-  summary,
   loading,
 }: {
   result: unknown;
-  summary?: string;
   loading?: boolean;
 }) {
   const [tab, setTab] = useState<"table" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
   return (
-    <div className="mt-4 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white/70 dark:bg-zinc-900/50 shadow">
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white/70 dark:bg-zinc-900/50 shadow md:col-span-2">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium">Sonuç</h2>
+        <h2 className="font-medium">SQL Çalıştırma Sonucu</h2>
         <div className="flex gap-2 text-xs">
           <button
             onClick={() => setTab("table")}
@@ -864,7 +776,6 @@ function ResultCard({
           </button>
         </div>
       </div>
-      {summary && <p className="mt-2 text-sm text-gray-600">{summary}</p>}
       <div className="mt-3">
         {loading ? (
           <div className="text-sm text-gray-500">Yükleniyor...</div>
@@ -886,69 +797,50 @@ function ResultCard({
   );
 }
 
-function SelectionCard({
-  selection,
+function SqlCard({
+  sql,
   loading,
+  schemaSource,
 }: {
-  selection: SelectionResult;
+  sql: string;
   loading?: boolean;
+  schemaSource?: string | null;
 }) {
-  const confidenceText =
-    typeof selection.confidence === "number"
-      ? `${Math.round(selection.confidence * 100)}%`
-      : "Belirsiz";
-
+  const showSource = schemaSource && schemaSource !== "none";
+  const sourceLabel = showSource ? schemaSourceLabel(schemaSource) : null;
   return (
-    <div className="mt-6 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4 shadow-lg">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold text-blue-100 flex items-center gap-2">
-          🔧 Seçilen Araç
-        </h2>
-        <span className="text-xs px-2 py-1 rounded-full bg-blue-900/50 text-blue-200 border border-blue-500/40">
-          {loading ? "Güncelleniyor..." : "Sonuç"}
-        </span>
+    <div className="rounded-2xl border border-blue-500/30 bg-blue-600/10 p-4 shadow-md">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold text-blue-100">Üretilen SQL</h2>
+        <button
+          className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-100 border border-blue-500/40 hover:bg-blue-500/30"
+          onClick={() => navigator.clipboard?.writeText(sql)}
+          disabled={loading}
+        >
+          Kopyala
+        </button>
       </div>
-
-      <div className="space-y-3 text-sm">
-        <div>
-          <span className="text-xs uppercase tracking-wide text-blue-300/80">
-            Kullanıcı Promptu
-          </span>
-          <p className="mt-1 text-blue-100/90 whitespace-pre-wrap break-words">
-            {selection.prompt}
-          </p>
+      {sourceLabel && (
+        <div className="text-xs text-blue-200 mb-2">
+          Şema kaynağı: {sourceLabel}
         </div>
+      )}
+      <pre className="bg-blue-900/30 border border-blue-700/40 rounded p-3 text-xs whitespace-pre-wrap break-words text-blue-100">
+        {sql}
+      </pre>
+    </div>
+  );
+}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="p-3 rounded-xl bg-blue-900/30 border border-blue-500/30">
-            <span className="text-xs uppercase tracking-wide text-blue-300/80">
-              Araç
-            </span>
-            <div className="mt-1 text-base font-semibold text-blue-100">
-              {selection.tool ? selection.tool : "Uygun araç bulunamadı"}
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-blue-900/30 border border-blue-500/30">
-            <span className="text-xs uppercase tracking-wide text-blue-300/80">
-              Güven
-            </span>
-            <div className="mt-1 text-base font-semibold text-blue-100">
-              {confidenceText}
-            </div>
-          </div>
-        </div>
-
-        {selection.reason && (
-          <div className="p-3 rounded-xl bg-blue-900/20 border border-blue-500/20">
-            <span className="text-xs uppercase tracking-wide text-blue-300/80">
-              Gerekçe
-            </span>
-            <p className="mt-1 text-blue-100/90 whitespace-pre-wrap break-words">
-              {selection.reason}
-            </p>
-          </div>
-        )}
-      </div>
+function ModelOutputCard({ output }: { output: string }) {
+  return (
+    <div className="rounded-2xl border border-purple-500/30 bg-purple-600/10 p-4 shadow-md">
+      <h2 className="text-sm font-semibold text-purple-100 mb-2">
+        Model Çıktısı
+      </h2>
+      <pre className="bg-purple-900/30 border border-purple-700/40 rounded p-3 text-xs whitespace-pre-wrap break-words text-purple-100">
+        {output}
+      </pre>
     </div>
   );
 }
@@ -1072,60 +964,11 @@ function LoadingOverlay() {
   );
 }
 
-function StepTimeline({ steps }: { steps: StepResult[] }) {
-  return (
-    <div className="px-4 pb-4">
-      <h3 className="font-medium mb-2">Zaman Çizelgesi</h3>
-      <ol className="relative border-l border-gray-200 dark:border-gray-800 ml-2 h-96 overflow-auto pr-2 custom-scroll">
-        {steps.map((st) => (
-          <li key={st.index} className="ml-4 mb-4">
-            <div
-              className={`w-2 h-2 rounded-full border -ml-[33px] mt-2 ${
-                st.error
-                  ? "bg-red-500 border-red-600"
-                  : "bg-green-500 border-green-600"
-              }`}
-            />
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-sm">
-                  Adım {st.index + 1}:{" "}
-                  <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
-                    {st.tool}
-                  </span>
-                </div>
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${
-                    st.error
-                      ? "bg-red-100 text-red-700"
-                      : "bg-emerald-100 text-emerald-700"
-                  }`}
-                >
-                  {st.error ? "Hata" : "Başarılı"}
-                </span>
-              </div>
-              {st.args && (
-                <pre className="mt-2 text-xs whitespace-pre-wrap break-words max-h-40 overflow-auto custom-scroll">
-                  {JSON.stringify(st.args, null, 2)}
-                </pre>
-              )}
-              {st.error ? (
-                <div className="mt-2 text-red-600 text-sm">{st.error}</div>
-              ) : (
-                <StepResultViewer result={st.result} />
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
-
 function StepResultViewer({ result }: { result: unknown }) {
   const [tab, setTab] = useState<"table" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
   const hasRows = rows.length > 0;
+
   return (
     <div className="mt-2">
       <div className="flex gap-2 text-xs">
@@ -1133,7 +976,7 @@ function StepResultViewer({ result }: { result: unknown }) {
           onClick={() => setTab("table")}
           className={`px-2 py-1 rounded ${
             tab === "table"
-              ? "bg-blue-600 text-white"
+              ? "bg-emerald-600 text-white"
               : "bg-gray-200 dark:bg-gray-800"
           }`}
         >
@@ -1143,7 +986,7 @@ function StepResultViewer({ result }: { result: unknown }) {
           onClick={() => setTab("json")}
           className={`px-2 py-1 rounded ${
             tab === "json"
-              ? "bg-blue-600 text-white"
+              ? "bg-emerald-600 text-white"
               : "bg-gray-200 dark:bg-gray-800"
           }`}
         >
@@ -1163,9 +1006,7 @@ function StepResultViewer({ result }: { result: unknown }) {
           hasRows ? (
             <DataTable rows={rows} />
           ) : (
-            <div className="text-xs text-gray-500">
-              Gösterilecek tablo verisi yok
-            </div>
+            <div className="text-xs text-gray-500">Gösterilecek tablo verisi yok</div>
           )
         ) : (
           <pre className="text-xs whitespace-pre-wrap break-words max-h-64 overflow-auto custom-scroll">
@@ -1177,80 +1018,6 @@ function StepResultViewer({ result }: { result: unknown }) {
   );
 }
 
-function useColumns() {
-  const [cols, setCols] = useState(1);
-  useEffect(() => {
-    const calc = () => {
-      const w = typeof window !== "undefined" ? window.innerWidth : 1024;
-      if (w < 640) setCols(1);
-      else if (w < 768) setCols(2);
-      else if (w < 1280) setCols(3);
-      else setCols(4);
-    };
-    calc();
-    window.addEventListener("resize", calc);
-    return () => window.removeEventListener("resize", calc);
-  }, []);
-  return cols;
-}
-
-function PlanRoadmap({ steps }: { steps: Step[] }) {
-  const cols = useColumns();
-  const rows: Step[][] = [];
-  for (let i = 0; i < steps.length; i += cols)
-    rows.push(steps.slice(i, i + cols));
-  return (
-    <div className="py-2 h-80 overflow-auto pr-2 custom-scroll">
-      {rows.map((row, rIdx) => {
-        const even = rIdx % 2 === 0; // 0-based: first row L→R, second R→L
-        const items = even ? row : [...row].reverse();
-        return (
-          <div key={rIdx} className="mb-3">
-            <div className="flex items-stretch gap-3">
-              {items.map((s, i) => (
-                <div
-                  key={`${rIdx}-${i}`}
-                  className="flex items-center gap-3 flex-1 min-w-0"
-                >
-                  <div className="rounded-lg bg-sky-50 dark:bg-sky-900/30 border border-sky-100 dark:border-sky-800 p-3 shadow-sm w-full">
-                    <div className="text-xs text-sky-700 dark:text-sky-300 font-semibold">
-                      Step {rIdx * cols + (even ? i + 1 : row.length - i)}
-                    </div>
-                    <div className="mt-1">
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
-                        {s.tool}
-                      </span>
-                    </div>
-                    {s.args && (
-                      <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words text-gray-700 dark:text-gray-300 max-h-28 overflow-auto custom-scroll">
-                        {JSON.stringify(s.args, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                  {i < items.length - 1 && (
-                    <div className="text-gray-400 text-xl select-none">
-                      {even ? "→" : "←"}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {rIdx < rows.length - 1 && (
-              <div
-                className={`flex ${
-                  even ? "justify-end" : "justify-start"
-                } mt-1`}
-              >
-                <div className="text-gray-400 select-none">↓</div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function DebugPanel({
   debug,
   onClearDebug,
@@ -1258,29 +1025,17 @@ function DebugPanel({
   debug: DebugPayload;
   onClearDebug?: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"aiCalls" | "tools" | "stages" | "raw">(
-    "aiCalls"
-  );
-  const aiCalls = debug.aiCalls || [];
-  const stages = debug.stages || [];
-  const tools = debug.toolsConsidered || [];
-
-  const tabs = [
-    { id: "aiCalls", label: "AI Calls", icon: "🤖", count: aiCalls.length },
-    { id: "tools", label: "Tools", icon: "🧰", count: tools.length },
-    { id: "stages", label: "Stages", icon: "📊", count: stages.length },
-    { id: "raw", label: "Raw", icon: "🔧", count: 1 },
-  ] as const;
-
   return (
-    <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-4">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-4 space-y-4">
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-lg">🔍</span>
-          <h3 className="text-lg font-semibold text-zinc-100">AI Debug Panel</h3>
-          {typeof debug.totalDuration === "number" && (
+          <h3 className="text-lg font-semibold text-zinc-100">
+            AI Debug Panel
+          </h3>
+          {typeof debug.totalDurationMs === "number" && (
             <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
-              {debug.totalDuration}ms
+              {debug.totalDurationMs}ms toplam
             </span>
           )}
           {debug.mode && (
@@ -1301,171 +1056,76 @@ function DebugPanel({
         </button>
       </div>
 
-      <div className="flex flex-wrap gap-1 mb-4 bg-zinc-800 rounded-lg p-1">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === tab.id
-                ? "bg-zinc-700 text-zinc-100 shadow-sm"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
-          >
-            <span className="mr-1">{tab.icon}</span>
-            {tab.label}
-            {tab.count > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs bg-zinc-600 rounded-full">
-                {tab.count}
-              </span>
+      <div className="space-y-3">
+        {debug.schema && (
+          <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+            <summary className="cursor-pointer text-sm text-zinc-200">
+              Şema Bilgisi
+            </summary>
+            <div className="mt-2 text-xs text-zinc-300 space-y-1">
+              {debug.schema.source && (
+                <div>
+                  Kaynak: <span className="text-zinc-100">{schemaSourceLabel(debug.schema.source)}</span>
+                </div>
+              )}
+              {typeof debug.schema.length === "number" && (
+                <div>
+                  Uzunluk: <span className="text-zinc-100">{debug.schema.length}</span> karakter
+                </div>
+              )}
+            </div>
+            {debug.schema.snippet && (
+              <pre className="mt-2 bg-zinc-900 border border-zinc-700 rounded p-2 text-[11px] max-h-48 overflow-auto whitespace-pre-wrap break-words text-zinc-200">
+                {debug.schema.snippet}
+                {debug.schema.length &&
+                  debug.schema.snippet.length < debug.schema.length &&
+                  "\n..."}
+              </pre>
             )}
-          </button>
-        ))}
+          </details>
+        )}
+
+        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+          <summary className="cursor-pointer text-sm text-zinc-200">
+            Deepseek Request
+          </summary>
+          <div className="mt-2">
+            <DebugJsonCard title="Body" value={debug.deepseek?.request} />
+          </div>
+        </details>
+
+        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+          <summary className="cursor-pointer text-sm text-zinc-200">
+            Deepseek Response
+          </summary>
+          <div className="mt-2">
+            <DebugJsonCard title="Response" value={debug.deepseek?.response} />
+          </div>
+        </details>
+
+        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3" open>
+          <summary className="cursor-pointer text-sm text-zinc-200">
+            MCP Execution
+          </summary>
+          <div className="mt-2 space-y-2">
+            {typeof debug.execution?.durationMs === "number" && (
+              <div className="text-xs text-zinc-400">
+                Süre: <span className="text-zinc-200">{debug.execution.durationMs}ms</span>
+              </div>
+            )}
+            <DebugJsonCard title="Result" value={debug.execution?.result} />
+          </div>
+        </details>
+
+        <details className="bg-zinc-800/60 border border-zinc-700/60 rounded-lg p-3">
+          <summary className="cursor-pointer text-sm text-zinc-200">
+            Tam Debug İçeriği
+          </summary>
+          <div className="mt-2">
+            <DebugJsonCard title="Debug" value={debug} />
+          </div>
+        </details>
       </div>
-
-      {activeTab === "aiCalls" && (
-        <div className="space-y-4">
-          {aiCalls.length === 0 ? (
-            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
-              AI çağrısı kaydı bulunamadı.
-            </div>
-          ) : (
-            aiCalls.map((call, index) => (
-              <div
-                key={index}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h5 className="font-semibold text-zinc-200">
-                      {call.modelName}
-                    </h5>
-                    <div className="text-xs text-zinc-400">
-                      {new Date(call.timestamp).toLocaleString("tr-TR")}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs px-2 py-1 bg-blue-900/40 text-blue-300 rounded-full">
-                      {call.duration}ms
-                    </span>
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full ${
-                        call.metadata?.success
-                          ? "bg-green-900/40 text-green-300"
-                          : "bg-yellow-900/40 text-yellow-300"
-                      }`}
-                    >
-                      {call.metadata?.success ? "Başarılı" : "Bilinmiyor"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <DebugJsonCard title="Input" value={call.input} />
-                  <DebugJsonCard title="Output" value={call.output} />
-                </div>
-
-                {call.metadata && (
-                  <details className="mt-3 text-xs text-zinc-400">
-                    <summary className="cursor-pointer">Metadata</summary>
-                    <pre className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2 text-[11px] max-h-48 overflow-auto">
-                      {JSON.stringify(call.metadata, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeTab === "tools" && (
-        <div className="space-y-3">
-          {tools.length === 0 ? (
-            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
-              Araç listesi sağlanmadı.
-            </div>
-          ) : (
-            tools.map((tool) => (
-              <div
-                key={tool.name}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-zinc-100">{tool.name}</h4>
-                </div>
-                {tool.description && (
-                  <p className="mt-2 text-sm text-zinc-300">{tool.description}</p>
-                )}
-                <div className="mt-2 text-xs text-zinc-400 space-y-1">
-                  <div className="font-semibold text-zinc-300 uppercase tracking-wide">
-                    Arguments
-                  </div>
-                  {tool.arguments && tool.arguments.length > 0 ? (
-                    <ul className="space-y-1">
-                      {tool.arguments.map((arg) => (
-                        <li key={arg.name} className="leading-snug">
-                          <span className="text-zinc-200">{arg.name}</span>
-                          <span className="text-zinc-500">: {arg.type || "any"}</span>
-                          {arg.required && (
-                            <span className="text-blue-300"> (required)</span>
-                          )}
-                          {arg.description && (
-                            <span className="text-zinc-400"> – {arg.description}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="text-zinc-500">Argüman tanımı yok</div>
-                  )}
-                  {tool.hasAdditionalArguments && (
-                    <div className="text-zinc-500">… diğer argümanlar gösterilmedi</div>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeTab === "stages" && (
-        <div className="space-y-3">
-          {stages.length === 0 ? (
-            <div className="bg-zinc-800/40 border border-zinc-700/40 rounded-lg p-4 text-sm text-zinc-400">
-              Aşama kaydı yok.
-            </div>
-          ) : (
-            stages.map((stage, index) => (
-              <div
-                key={index}
-                className="bg-zinc-800 border border-zinc-700 rounded-lg p-4"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-zinc-100">
-                    {stage.stage}
-                  </span>
-                  <span className="text-xs text-zinc-400">
-                    {new Date(stage.timestamp).toLocaleString("tr-TR")}
-                  </span>
-                </div>
-                <pre className="mt-2 bg-zinc-900 border border-zinc-600 rounded p-2 text-[11px] max-h-48 overflow-auto">
-                  {JSON.stringify(stage.data, null, 2)}
-                </pre>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {activeTab === "raw" && (
-        <div className="space-y-3 text-xs text-zinc-300">
-          <DebugJsonCard title="Request" value={debug.request} />
-          <DebugJsonCard title="Raw Model Response" value={debug.rawModelResponse} />
-          <DebugJsonCard title="Raw Response Text" value={debug.rawResponseText} />
-          <DebugJsonCard title="Full Debug" value={debug} />
-        </div>
-      )}
     </div>
   );
 }
