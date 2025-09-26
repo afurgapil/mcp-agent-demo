@@ -11,6 +11,7 @@ import {
   fetchTools as apiFetchTools,
   callTool as apiCallTool,
   generate as apiGenerate,
+  syncEmbeddingConfig as apiSyncEmbedding,
 } from "../services/api";
 const MODEL_STORAGE_KEY = "mcp_ui_model";
 
@@ -30,6 +31,39 @@ type DebugPayload = {
     source?: string;
     length?: number;
     snippet?: string;
+  };
+};
+
+type ToolCallInfo = {
+  name: string;
+  arguments?: Record<string, unknown>;
+  reason?: string | null;
+};
+
+type PlannerSummary = {
+  decision?: string | null;
+  reason?: string | null;
+  tool?: {
+    name?: string | null;
+    description?: string | null;
+  } | null;
+};
+
+type AppConfig = {
+  system_prompt: string;
+  schema: string;
+  toolset?: {
+    enabled?: boolean;
+    name?: string;
+  };
+  embedding?: {
+    url?: string | null;
+    status?: {
+      generatedAt?: string | null;
+      count?: number;
+      model?: string;
+      [key: string]: unknown;
+    } | null;
   };
 };
 
@@ -105,10 +139,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"query" | "config" | "tools">(
     "query"
   );
-  const [config, setConfig] = useState<{
-    system_prompt: string;
-    schema: string;
-  } | null>(null);
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
 
@@ -133,6 +164,12 @@ export default function Home() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(["Database Query", "Database Management"])
   );
+  const [useToolset, setUseToolset] = useState(false);
+  const [strategy, setStrategy] = useState<"tool" | "sql" | null>(null);
+  const [toolCall, setToolCall] = useState<ToolCallInfo | null>(null);
+  const [plannerInfo, setPlannerInfo] = useState<PlannerSummary | null>(null);
+  const [plannerDebug, setPlannerDebug] = useState<unknown>(null);
+  const [syncingEmbedding, setSyncingEmbedding] = useState(false);
 
   // Tool categorization function
   const categorizeTools = (
@@ -223,6 +260,12 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
+  useEffect(() => {
+    if (config) {
+      setUseToolset(!!config.toolset?.enabled);
+    }
+  }, [config]);
+
   async function loadConfig() {
     setConfigLoading(true);
     setConfigError(null);
@@ -234,6 +277,8 @@ export default function Home() {
       setConfig({
         system_prompt: data.system_prompt,
         schema: data.schema || "",
+        toolset: data.toolset,
+        embedding: data.embedding,
       });
       if (!model && typeof (data as { model?: string })?.model === "string") {
         setModel(((data as { model?: string }).model as string) || "");
@@ -246,6 +291,21 @@ export default function Home() {
       setConfigLoading(false);
     }
   }
+
+  const syncEmbedding = async () => {
+    if (syncingEmbedding) return;
+    setSyncingEmbedding(true);
+    try {
+      await apiSyncEmbedding();
+      await loadConfig();
+    } catch (err: unknown) {
+      setConfigError(
+        err instanceof Error ? err.message : "Embedding sync failed"
+      );
+    } finally {
+      setSyncingEmbedding(false);
+    }
+  };
 
   async function loadTools() {
     setToolsLoading(true);
@@ -293,6 +353,10 @@ export default function Home() {
   async function saveConfig(newConfig: {
     system_prompt?: string;
     schema?: string;
+    toolset?: {
+      enabled?: boolean;
+      name?: string;
+    };
   }) {
     setConfigLoading(true);
     setConfigError(null);
@@ -331,12 +395,17 @@ export default function Home() {
     setModelOutput(null);
     setDebugData(null);
     setSchemaSource(null);
+    setStrategy(null);
+    setToolCall(null);
+    setPlannerInfo(null);
+    setPlannerDebug(null);
     try {
       const data = await apiGenerate({
         prompt: query,
         schema: customSchema,
         provider: provider as "deepseek" | "custom",
         ...(model ? { model } : {}),
+        useToolset,
       });
       setRaw(data);
       setGeneratedSql(typeof data.sql === "string" ? data.sql : null);
@@ -348,6 +417,40 @@ export default function Home() {
       setSchemaSource(
         typeof data.schemaSource === "string" ? data.schemaSource : null
       );
+      setStrategy(
+        data && data.strategy === "tool"
+          ? "tool"
+          : data && data.strategy === "sql"
+          ? "sql"
+          : null
+      );
+      const plannerPayload =
+        data && typeof data.planner === "object" && data.planner !== null
+          ? (data.planner as PlannerSummary)
+          : null;
+      setPlannerInfo(plannerPayload);
+      setPlannerDebug(data?.plannerDebug ?? null);
+      const nextToolCall = (() => {
+        if (!data || typeof data !== "object" || data === null) return null;
+        const raw = (data as { toolCall?: unknown }).toolCall;
+        if (!raw || typeof raw !== "object") return null;
+        const nameValue = (raw as { name?: unknown }).name;
+        if (typeof nameValue !== "string" || !nameValue.trim()) return null;
+        const argsValue = (raw as { arguments?: unknown }).arguments;
+        const reasonValue = (raw as { reason?: unknown }).reason;
+        return {
+          name: nameValue,
+          arguments:
+            argsValue && typeof argsValue === "object" && argsValue !== null
+              ? (argsValue as Record<string, unknown>)
+              : undefined,
+          reason:
+            typeof reasonValue === "string" && reasonValue.trim()
+              ? reasonValue
+              : null,
+        } satisfies ToolCallInfo;
+      })();
+      setToolCall(nextToolCall);
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "Request failed";
@@ -495,6 +598,37 @@ export default function Home() {
                     onChange={(e) => setQuery(e.target.value)}
                   />
                 </div>
+                <div className="bg-zinc-900/40 border border-zinc-800/60 rounded-2xl px-4 py-3 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-100">
+                      Prefer MCP tool execution
+                    </p>
+                    <p className="text-xs text-zinc-400">
+                      When enabled, the assistant tries available tools before
+                      generating SQL.
+                    </p>
+                    {useToolset && (
+                      <p className="text-[11px] text-amber-300 mt-1">
+                        The embedding service must be running for toolset mode
+                        to work.{" "}
+                        {config?.embedding?.url
+                          ? `(${config.embedding.url}${
+                              config?.embedding?.status ? " online" : " unreachable"
+                            })`
+                          : "(EMBED_LLM_URL not configured)"}
+                      </p>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 text-blue-500 focus:ring-0"
+                      checked={useToolset}
+                      onChange={(e) => setUseToolset(e.target.checked)}
+                    />
+                    <span>{useToolset ? "On" : "Off"}</span>
+                  </label>
+                </div>
               </div>
               <div className="flex gap-4 pt-2">
                 <button
@@ -526,6 +660,10 @@ export default function Home() {
                     setModelOutput(null);
                     setDebugData(null);
                     setSchemaSource(null);
+                    setStrategy(null);
+                    setToolCall(null);
+                    setPlannerInfo(null);
+                    setPlannerDebug(null);
                   }}
                 >
                   <span className="flex items-center gap-2"> Clear</span>
@@ -562,6 +700,8 @@ export default function Home() {
             loading={configLoading}
             error={configError}
             onSave={saveConfig}
+            onSyncEmbedding={syncEmbedding}
+            syncingEmbedding={syncingEmbedding}
           />
         )}
 
@@ -571,6 +711,44 @@ export default function Home() {
             {error && (
               <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
                 Error: {error}
+              </div>
+            )}
+            {plannerInfo && (
+              <PlannerSummaryCard
+                planner={plannerInfo}
+                debugData={plannerDebug}
+              />
+            )}
+            {strategy && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 text-sm md:col-span-2 flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-zinc-200">
+                  <span className="uppercase tracking-wider text-xs text-zinc-500">
+                    Execution Strategy
+                  </span>
+                  <span className="px-2 py-1 rounded-full text-xs bg-zinc-800 text-zinc-100">
+                    {strategy === "tool" ? "MCP Tool" : "SQL"}
+                  </span>
+                </div>
+                {strategy === "tool" && (
+                  <div className="text-xs text-zinc-400">
+                    <p>
+                      {toolCall?.reason
+                        ? toolCall.reason
+                        : "The assistant routed the request through an MCP tool before generating SQL."}
+                    </p>
+                    {toolCall?.name && (
+                      <p className="mt-1 text-zinc-300">
+                        Tool used:{" "}
+                        <span className="font-medium">{toolCall.name}</span>
+                      </p>
+                    )}
+                  </div>
+                )}
+                {strategy === "sql" && (
+                  <p className="text-xs text-zinc-400">
+                    The assistant generated SQL with the configured provider.
+                  </p>
+                )}
               </div>
             )}
             {generatedSql && (
@@ -589,6 +767,8 @@ export default function Home() {
               <ExecutionResultCard
                 result={executionResult as Record<string, unknown>}
                 loading={loading}
+                strategy={strategy}
+                toolCall={toolCall}
               />
             )}
 
@@ -623,16 +803,29 @@ export default function Home() {
 function ExecutionResultCard({
   result,
   loading,
+  strategy,
+  toolCall,
 }: {
   result: unknown;
   loading?: boolean;
+  strategy?: "tool" | "sql" | null;
+  toolCall?: ToolCallInfo | null;
 }) {
   const [tab, setTab] = useState<"table" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
+  const title =
+    strategy === "tool"
+      ? `Tool Result${toolCall?.name ? ` • ${toolCall.name}` : ""}`
+      : "SQL Execution Result";
+  const hasArgs =
+    toolCall?.arguments &&
+    typeof toolCall.arguments === "object" &&
+    toolCall.arguments !== null &&
+    Object.keys(toolCall.arguments).length > 0;
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white/70 dark:bg-zinc-900/50 shadow md:col-span-2">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium">SQL Execution Result</h2>
+        <h2 className="font-medium">{title}</h2>
         <div className="flex gap-2 text-xs">
           <button
             onClick={() => setTab("table")}
@@ -656,6 +849,21 @@ function ExecutionResultCard({
           </button>
         </div>
       </div>
+      {strategy === "tool" && (
+        <div className="mt-3 text-xs text-zinc-400 space-y-2">
+          {toolCall?.reason && <p>{toolCall.reason}</p>}
+          {hasArgs && (
+            <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg p-3 text-[11px] text-zinc-300">
+              <div className="mb-1 text-zinc-400 uppercase tracking-wide text-[10px]">
+                Tool Arguments
+              </div>
+              <pre className="whitespace-pre-wrap break-words">
+                {JSON.stringify(toolCall.arguments, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
       <div className="mt-3">
         {loading ? (
           <div className="text-sm text-gray-500">Loading...</div>
@@ -708,6 +916,59 @@ function SqlCard({
       <pre className="bg-blue-900/30 border border-blue-700/40 rounded p-3 text-xs whitespace-pre-wrap break-words text-blue-100">
         {sql}
       </pre>
+    </div>
+  );
+}
+
+function PlannerSummaryCard({
+  planner,
+  debugData,
+}: {
+  planner: PlannerSummary;
+  debugData: unknown;
+}) {
+  const pretty = useMemo(() => {
+    if (!debugData) return null;
+    try {
+      return JSON.stringify(debugData, null, 2);
+    } catch {
+      return null;
+    }
+  }, [debugData]);
+
+  return (
+    <div className="rounded-xl border border-blue-800/40 bg-blue-950/30 p-4 text-sm md:col-span-2 flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-blue-100">
+        <span className="uppercase tracking-wider text-xs text-blue-400">
+          Planner Decision
+        </span>
+        {planner.decision && (
+          <span className="px-2 py-1 rounded-full text-xs bg-blue-900/60 border border-blue-800/80">
+            {planner.decision.toUpperCase()}
+          </span>
+        )}
+      </div>
+      {planner.reason && (
+        <p className="text-xs text-blue-200/90">{planner.reason}</p>
+      )}
+      {planner.tool?.name && (
+        <div className="text-xs text-blue-100">
+          <strong>Tool:</strong> {planner.tool.name}
+          {planner.tool.description && (
+            <p className="mt-1 text-blue-200/70">{planner.tool.description}</p>
+          )}
+        </div>
+      )}
+      {pretty && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs text-blue-300/80">
+            Debug details
+          </summary>
+          <pre className="mt-2 text-[11px] text-blue-200 whitespace-pre-wrap break-words bg-blue-900/40 border border-blue-900/60 rounded p-2">
+            {pretty}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }
@@ -1037,17 +1298,27 @@ function ConfigurationPanel({
   loading,
   error,
   onSave,
+  onSyncEmbedding,
+  syncingEmbedding,
 }: {
-  config: { system_prompt: string; schema: string } | null;
+  config: AppConfig | null;
   loading: boolean;
   error: string | null;
   onSave: (config: {
     system_prompt?: string;
     schema?: string;
+    toolset?: {
+      enabled?: boolean;
+      name?: string;
+    };
   }) => Promise<boolean>;
+  onSyncEmbedding: () => void | Promise<void>;
+  syncingEmbedding: boolean;
 }) {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [schema, setSchema] = useState("");
+  const [toolsetEnabled, setToolsetEnabled] = useState(false);
+  const [toolsetName, setToolsetName] = useState("");
   const [hasChanges, setHasChanges] = useState(false);
 
   // Update local state when config loads
@@ -1055,6 +1326,8 @@ function ConfigurationPanel({
     if (config) {
       setSystemPrompt(config.system_prompt);
       setSchema(config.schema);
+      setToolsetEnabled(!!config.toolset?.enabled);
+      setToolsetName(config.toolset?.name || "");
       setHasChanges(false);
     }
   }, [config]);
@@ -1063,18 +1336,36 @@ function ConfigurationPanel({
   useEffect(() => {
     if (config) {
       const changed =
-        systemPrompt !== config.system_prompt || schema !== config.schema;
+        systemPrompt !== config.system_prompt ||
+        schema !== config.schema ||
+        toolsetEnabled !== !!config.toolset?.enabled ||
+        toolsetName !== (config.toolset?.name || "");
       setHasChanges(changed);
     }
-  }, [systemPrompt, schema, config]);
+  }, [systemPrompt, schema, toolsetEnabled, toolsetName, config]);
 
   const handleSave = async () => {
     if (!config) return;
 
-    const updates: { system_prompt?: string; schema?: string } = {};
+    const updates: {
+      system_prompt?: string;
+      schema?: string;
+      toolset?: {
+        enabled?: boolean;
+        name?: string;
+      };
+    } = {};
     if (systemPrompt !== config.system_prompt)
       updates.system_prompt = systemPrompt;
     if (schema !== config.schema) updates.schema = schema;
+    const originalEnabled = !!config.toolset?.enabled;
+    const originalName = config.toolset?.name || "";
+    if (toolsetEnabled !== originalEnabled || toolsetName !== originalName) {
+      updates.toolset = {
+        enabled: toolsetEnabled,
+        name: toolsetName,
+      };
+    }
 
     if (Object.keys(updates).length > 0) {
       const success = await onSave(updates);
@@ -1088,6 +1379,8 @@ function ConfigurationPanel({
     if (config) {
       setSystemPrompt(config.system_prompt);
       setSchema(config.schema);
+      setToolsetEnabled(!!config.toolset?.enabled);
+      setToolsetName(config.toolset?.name || "");
       setHasChanges(false);
     }
   };
@@ -1154,6 +1447,76 @@ function ConfigurationPanel({
             queries.
           </p>
         </div>
+
+        {/* Toolset & Embedding */}
+        <div className="rounded-2xl border border-zinc-800/60 bg-zinc-900/40 p-4 space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-100">
+                Toolset & Embedding
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                When toolset mode is enabled, requests are handled with MCP tools first.
+                The embedding service must be running for this to work.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 text-blue-500 focus:ring-0"
+                checked={toolsetEnabled}
+                onChange={(e) => setToolsetEnabled(e.target.checked)}
+                disabled={loading}
+              />
+              <span>{toolsetEnabled ? "Enabled" : "Disabled"}</span>
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2 text-zinc-100">
+              Toolset Name (optional)
+            </label>
+            <input
+              className="w-full rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 p-3 text-sm focus:outline-none shadow-sm"
+              placeholder="e.g., readonly, admin"
+              value={toolsetName}
+              onChange={(e) => setToolsetName(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+
+          <div className="text-xs text-zinc-400">
+            {config?.embedding?.url ? (
+              <p>
+                Embedding service: {config.embedding.url}
+                {config.embedding.status ? (
+                  <span className="text-emerald-300 ml-2">
+                    Connection successful.
+                  </span>
+                ) : (
+                  <span className="text-amber-300 ml-2">
+                    Service unreachable. Required for toolset mode.
+                  </span>
+                )}
+              </p>
+            ) : (
+              <p className="text-amber-300">
+                EMBED_LLM_URL is not defined. Toolset mode will not work.
+              </p>
+            )}
+            {config?.embedding?.status && (
+              <p className="mt-1 text-zinc-400">
+                Model: {config.embedding.status.model || "unknown"} • Tool
+                count: {config.embedding.status.count ?? "?"} • Updated:{" "}
+                {config.embedding.status.generatedAt
+                  ? new Date(
+                      String(config.embedding.status.generatedAt)
+                    ).toLocaleString()
+                  : "unknown"}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Action Buttons */}
@@ -1163,14 +1526,21 @@ function ConfigurationPanel({
           className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm disabled:opacity-60 shadow hover:brightness-110 transition"
           disabled={loading || !hasChanges}
         >
-          {loading ? "Saving..." : "Save"}
+          {loading ? "Saving..." : "Save Changes"}
         </button>
         <button
           onClick={handleReset}
           className="px-4 py-2 rounded-lg border border-zinc-700 text-sm hover:bg-zinc-900 transition"
           disabled={loading || !hasChanges}
         >
-          Reset
+          Reset Changes
+        </button>
+        <button
+          onClick={onSyncEmbedding}
+          className="px-4 py-2 rounded-lg border border-blue-700 text-sm text-blue-200 hover:bg-blue-950 transition disabled:opacity-60"
+          disabled={loading || syncingEmbedding || !config?.embedding?.url}
+        >
+          {syncingEmbedding ? "Syncing..." : "Sync Embedding Service"}
         </button>
         <div className="flex-1" />
         {hasChanges && (
@@ -1547,7 +1917,9 @@ function ToolsPanel({
                 <span className="text-3xl">🛠️</span>
               </div>
               <div className="text-center space-y-2">
-                <p className="text-lg font-medium text-zinc-300">Select a Tool</p>
+                <p className="text-lg font-medium text-zinc-300">
+                  Select a Tool
+                </p>
                 <p className="text-sm text-zinc-500">
                   Start by selecting a tool from the left
                 </p>

@@ -8,7 +8,7 @@ function extractSqlFromText(text) {
   if (!text) return "";
   // 1) Prefer explicit channel markers at the end like: "final|> ..." or "message|> ..."
   const channelMatch = text.match(/(?:final\|>|message\|>)\s*([\s\S]*)$/i);
-  let candidate = channelMatch ? channelMatch[1] : null;
+  let candidate = channelMatch ? channelMatch[1] : text;
 
   // Normalize: strip leading section labels such as "SQL:", "Query:", etc.
   let normalized = candidate.replace(/^\s*(SQL|Query|Sorgu)\s*[:\-]\s*/i, "");
@@ -30,12 +30,7 @@ function extractSqlFromText(text) {
   return cleaned;
 }
 
-export async function callCustomForSql({
-  userPrompt,
-  schema,
-  systemPrompt,
-  apiBase,
-}) {
+function resolveApiBase(apiBase) {
   let base = (apiBase || CUSTOM_API_BASE || "").trim();
   if (base && !/^https?:\/\//i.test(base)) {
     base = `http://${base}`;
@@ -43,13 +38,67 @@ export async function callCustomForSql({
   if (!base) {
     throw new Error("Custom provider apiBase is not configured");
   }
+  return base;
+}
 
+export async function callCustomChat({
+  systemPrompt,
+  userPrompt,
+  apiBase,
+}) {
+  const base = resolveApiBase(apiBase);
   const endpoint = new URL("/api/generate", base).toString();
+  const promptParts = [];
+  if (systemPrompt && systemPrompt.trim()) {
+    promptParts.push(systemPrompt.trim());
+  }
+  if (userPrompt && userPrompt.trim()) {
+    promptParts.push(userPrompt.trim());
+  }
+  const message = promptParts.join("\n\n");
+
+  const body = {
+    message,
+  };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.detail?.[0]?.msg || data?.message || res.statusText;
+    throw new Error(`Custom API error ${res.status}: ${msg}`);
+  }
+
+  const content =
+    (data && typeof data.response === "string" && data.response) || "";
+  if (!content) {
+    throw new Error("Custom API returned empty response");
+  }
+
+  return {
+    content,
+    response: data,
+    request: body,
+    usage: undefined,
+  };
+}
+
+export async function callCustomForSql({
+  userPrompt,
+  schema,
+  systemPrompt,
+  apiBase,
+}) {
+  const base = resolveApiBase(apiBase);
+
   const body = {
     message: buildUserMessage(userPrompt),
   };
 
-  const res = await fetch(endpoint, {
+  const res = await fetch(new URL("/api/generate", base).toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

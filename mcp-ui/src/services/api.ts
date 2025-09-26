@@ -6,6 +6,55 @@ export type ConfigResponse = {
   system_prompt: string;
   schema?: string;
   model?: string;
+  toolset?: {
+    enabled?: boolean;
+    name?: string;
+  };
+  embedding?: {
+    url?: string | null;
+    status?: {
+      generatedAt?: string | null;
+      count?: number;
+      model?: string;
+      [key: string]: unknown;
+    } | null;
+  };
+};
+
+export type GenerateRequest = {
+  prompt: string;
+  schema?: string;
+  provider?: "deepseek" | "custom" | "gemini";
+  model?: string;
+  useToolset?: boolean;
+  toolsetName?: string;
+};
+
+export type GenerateResponse = {
+  prompt?: string;
+  sql?: string | null;
+  rawModelOutput?: string | null;
+  executionResult?: unknown;
+  schemaSource?: string | null;
+  usage?: unknown;
+  provider?: string;
+  model?: string | null;
+  strategy?: "tool" | "sql";
+  toolCall?: {
+    name?: string;
+    arguments?: Record<string, unknown>;
+    reason?: string | null;
+  } | null;
+  planner?: {
+    decision?: string | null;
+    reason?: string | null;
+    tool?: {
+      name?: string | null;
+      description?: string | null;
+    } | null;
+  } | null;
+  plannerDebug?: unknown;
+  [key: string]: unknown;
 };
 
 export async function getDebugStatus() {
@@ -61,6 +110,19 @@ export async function fetchTools() {
   return res.json();
 }
 
+export async function syncEmbeddingConfig() {
+  const res = await fetch(`${API_BASE}/api/config/embed-sync`, {
+    method: "POST",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message =
+      (data && (data.message || data.error)) || res.statusText || "Failed";
+    throw new Error(message);
+  }
+  return data;
+}
+
 export async function callTool(name: string, args: Record<string, unknown>) {
   const res = await fetch(`${API_BASE}/tool`, {
     method: "POST",
@@ -71,12 +133,7 @@ export async function callTool(name: string, args: Record<string, unknown>) {
   return res.json();
 }
 
-export async function generate(body: {
-  prompt: string;
-  schema?: string;
-  provider?: "deepseek" | "custom";
-  model?: string;
-}) {
+export async function generate(body: GenerateRequest): Promise<GenerateResponse> {
   const res = await fetch(`${API_BASE}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

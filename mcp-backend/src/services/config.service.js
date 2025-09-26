@@ -14,6 +14,10 @@ const DEFAULT_CONFIG = {
   schema: "",
   model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
   defaultProvider: "deepseek",
+  toolset: {
+    enabled: false,
+    name: "",
+  },
   providers: {
     deepseek: {
       apiBase: process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com",

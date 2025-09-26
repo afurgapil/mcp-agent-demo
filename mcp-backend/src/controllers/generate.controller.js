@@ -8,7 +8,8 @@ import {
   getAutoSchemaFromCache,
   updateUsageCsv,
 } from "../services/schema.service.js";
-import { callTool } from "../services/mcp.service.js";
+import { callTool, listTools } from "../services/mcp.service.js";
+import { planToolUsage } from "../services/toolset.service.js";
 import { getIsDebugMode } from "./debug.controller.js";
 
 async function executeSqlThroughMcp(sql) {
@@ -89,41 +90,237 @@ export async function generateHandler(req, res) {
   const startTime = Date.now();
   const debugInfo = {
     schema: { source: schemaSource, length: schemaToUse.length },
+    planner: null,
     deepseek: null,
     execution: null,
     totalDurationMs: 0,
   };
+  const toolsetEnabled =
+    typeof body.useToolset === "boolean"
+      ? body.useToolset
+      : !!config?.toolset?.enabled;
+  const toolsetName =
+    typeof body.toolsetName === "string" && body.toolsetName.trim()
+      ? body.toolsetName.trim()
+      : typeof config?.toolset?.name === "string"
+      ? config.toolset.name.trim()
+      : null;
+  const customApiBase =
+    config?.providers?.custom?.apiBase || process.env.CUSTOM_API_BASE;
+
+  let executionStrategy = "sql";
+  let toolCallInfo = null;
+  let plannerSummary = null;
+  let plannerDetails = null;
 
   try {
     const useProvider =
       (typeof provider === "string" && provider.trim()) || "deepseek";
+    const modelToUse = (() => {
+      if (typeof requestedModel === "string" && requestedModel.trim()) {
+        return requestedModel.trim();
+      }
+      if (useProvider === "gemini") {
+        return (
+          config?.providers?.gemini?.model || process.env.GEMINI_MODEL || null
+        );
+      }
+      if (useProvider === "custom") {
+        return undefined;
+      }
+      return config.model || undefined;
+    })();
+
+    if (toolsetEnabled) {
+      try {
+        const tools = await listTools();
+        const plannerResult = await planToolUsage({
+          prompt,
+          schema: schemaToUse,
+          tools,
+          provider: useProvider,
+          model: modelToUse,
+          toolsetName,
+          customApiBase,
+        });
+        plannerDetails = plannerResult;
+        try {
+          console.debug(
+            "Toolset planner decision",
+            JSON.stringify(
+              {
+                decision: plannerResult.decision,
+                reason: plannerResult.reason,
+                tool: plannerResult.tool?.name || null,
+                tokens: plannerResult.debug?.tokens || null,
+                tableHints: plannerResult.debug?.tableHints || null,
+              },
+              null,
+              2
+            )
+          );
+        } catch {}
+        const plannerReason = plannerResult.reason || null;
+        const plannerToolDefinition = plannerResult.toolDefinition || null;
+        plannerSummary = {
+          decision: plannerResult.decision,
+          reason: plannerReason,
+          tool: plannerResult.tool
+            ? {
+                name: plannerResult.tool.name,
+                description:
+                  plannerToolDefinition?.description ||
+                  plannerToolDefinition?.summary ||
+                  null,
+              }
+            : null,
+        };
+        debugInfo.planner = {
+          request: plannerResult.request,
+          response: plannerResult.response,
+          rawContent: plannerResult.rawContent,
+          parsed: plannerResult.parsed,
+          decision: plannerResult.decision,
+          reason: plannerReason,
+          tool: plannerResult.tool,
+          toolDefinition: plannerToolDefinition,
+          details: plannerResult.debug,
+        };
+        if (
+          plannerResult.decision === "tool" &&
+          plannerResult.tool &&
+          typeof plannerResult.tool.name === "string" &&
+          plannerResult.tool.name.trim()
+        ) {
+          const argsCandidate = plannerResult.tool.arguments;
+          const toolArgs =
+            argsCandidate &&
+            typeof argsCandidate === "object" &&
+            !Array.isArray(argsCandidate)
+              ? argsCandidate
+              : {};
+          const started = Date.now();
+          try {
+            const toolResult = await callTool(
+              plannerResult.tool.name,
+              toolArgs
+            );
+            const durationMs = Date.now() - started;
+            executionStrategy = "tool";
+            toolCallInfo = {
+              name: plannerResult.tool.name,
+              arguments: toolArgs,
+              reason: plannerReason,
+            };
+            debugInfo.execution = {
+              durationMs,
+              result: toolResult,
+              toolName: plannerResult.tool.name,
+              arguments: toolArgs,
+            };
+            debugInfo.totalDurationMs = Date.now() - startTime;
+
+            if (plannerResult.usage) {
+              updateUsageCsv({
+                promptTokens: plannerResult.usage.prompt_tokens,
+                completionTokens: plannerResult.usage.completion_tokens,
+                totalTokens: plannerResult.usage.total_tokens,
+                schemaSource,
+              });
+            }
+
+            const responsePayload = {
+              prompt,
+              sql: null,
+              rawModelOutput: plannerResult.rawContent,
+              executionResult: toolResult,
+              schemaSource,
+              usage: plannerResult.usage || undefined,
+              provider: useProvider,
+              model: modelToUse || undefined,
+              strategy: executionStrategy,
+              toolCall: toolCallInfo,
+              plannerDebug: plannerResult.debug,
+            };
+
+            if (getIsDebugMode()) {
+              responsePayload.debug = {
+                mode: "enabled",
+                totalDurationMs: debugInfo.totalDurationMs,
+                schema: {
+                  source: schemaSource,
+                  length: schemaToUse.length,
+                  snippet: schemaToUse.slice(0, 2000),
+                },
+                planner: debugInfo.planner,
+                deepseek: null,
+                execution: debugInfo.execution,
+              };
+            }
+
+            return sendJSON(res, 200, responsePayload);
+          } catch (toolErr) {
+            console.warn(
+              `Tool execution via planner failed (${plannerResult.tool.name}): ${
+                toolErr.message
+              }`
+            );
+            executionStrategy = "sql";
+            debugInfo.execution = {
+              error: toolErr.message,
+              toolName: plannerResult.tool.name,
+              arguments: toolArgs,
+            };
+            toolCallInfo = {
+              name: plannerResult.tool.name,
+              arguments: toolArgs,
+              reason: plannerReason
+                ? `${plannerReason} (tool execution failed: ${toolErr.message})`
+                : `Tool execution failed: ${toolErr.message}`,
+            };
+          }
+        }
+        if (!plannerResult.tool && plannerReason) {
+          toolCallInfo = {
+            name: undefined,
+            arguments: undefined,
+            reason: plannerReason,
+          };
+        }
+      } catch (plannerErr) {
+        console.warn(
+          `Toolset planner failed (falling back to SQL): ${plannerErr.message}`
+        );
+        debugInfo.planner = {
+          error: plannerErr.message,
+        };
+        plannerSummary = {
+          decision: "error",
+          reason: plannerErr.message,
+          tool: null,
+        };
+      }
+    }
     const llmResponse =
       useProvider === "custom"
         ? await callCustomForSql({
             userPrompt: prompt,
             schema: schemaToUse,
             systemPrompt: config.system_prompt,
-            apiBase:
-              config?.providers?.custom?.apiBase || process.env.CUSTOM_API_BASE,
+            apiBase: customApiBase,
           })
         : useProvider === "gemini"
         ? await callGeminiForSql({
             userPrompt: prompt,
             schema: schemaToUse,
             systemPrompt: config.system_prompt,
-            model:
-              typeof requestedModel === "string" && requestedModel.trim()
-                ? requestedModel.trim()
-                : config?.providers?.gemini?.model || process.env.GEMINI_MODEL,
+            model: modelToUse,
           })
         : await callDeepseekForSql({
             userPrompt: prompt,
             schema: schemaToUse,
             systemPrompt: config.system_prompt,
-            model:
-              typeof requestedModel === "string" && requestedModel.trim()
-                ? requestedModel.trim()
-                : config.model || undefined,
+            model: modelToUse,
           });
 
     debugInfo.deepseek = {
@@ -145,10 +342,11 @@ export async function generateHandler(req, res) {
       schemaSource,
       usage: llmResponse.usage || undefined,
       provider: useProvider,
-      model:
-        typeof requestedModel === "string" && requestedModel.trim()
-          ? requestedModel.trim()
-          : config.model || undefined,
+      model: modelToUse || undefined,
+      strategy: executionStrategy,
+      toolCall: toolCallInfo,
+      planner: plannerSummary || undefined,
+      plannerDebug: plannerSummary ? plannerDetails?.debug : undefined,
     };
 
     if (getIsDebugMode()) {
@@ -160,6 +358,7 @@ export async function generateHandler(req, res) {
           length: schemaToUse.length,
           snippet: schemaToUse.slice(0, 2000),
         },
+        planner: debugInfo.planner,
         deepseek: {
           request: debugInfo.deepseek.request,
           response: debugInfo.deepseek.response,
@@ -195,6 +394,7 @@ export async function generateHandler(req, res) {
             length: schemaToUse.length,
             snippet: schemaToUse.slice(0, 2000),
           },
+          planner: debugInfo.planner,
           deepseek: debugInfo.deepseek,
           execution: debugInfo.execution,
         },

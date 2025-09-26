@@ -19,6 +19,7 @@ MCP Agent Demo is a natural language to SQL platform with Model Context Protocol
 - **Multiple Providers**: Deepseek, Gemini (Google AI Studio), or Custom GGUF HTTP API
 - **SQL Generation**: Natural language → SQL using your selected provider
 - **MCP Integration**: Execute SQL via MCP toolbox tools
+- **Toolset-Aware Routing**: Optionally let the assistant prefer MCP tools before falling back to raw SQL
 - **Modern UI**: Next.js + Tailwind, clean and responsive
 - **Reports**: Usage and schema summaries under `mcp-backend/reports/`
 
@@ -164,6 +165,13 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 3. Fill in your database connection details
 4. Keep `tools.yaml` out of git for security
 
+### Toolset Planner (Optional)
+
+- Set `toolset.enabled` to `true` in `mcp-backend/config.json` (or via `PUT /api/config`) to activate tool-first routing
+- When enabled, the backend asks the LLM to inspect the active MCP toolset and choose a tool if it can satisfy the request
+- If no suitable tool is found or the tool call fails, the system falls back to the standard SQL generation flow
+- The frontend exposes a toggle so you can opt-in per request without changing the persisted configuration
+
 ## Features Deep Dive
 
 ### SQL Generation
@@ -179,6 +187,7 @@ The platform uses the selected provider to:
 - **Tool Execution**: Seamlessly executes tools via MCP protocol
 - **Error Handling**: Graceful handling of tool execution errors
 - **Real-time Updates**: Live progress via Server-Sent Events
+- **Toolset Planner (optional)**: Enable `toolset.enabled` to let the assistant pick a matching MCP tool before generating SQL
 
 ### Security Features
 

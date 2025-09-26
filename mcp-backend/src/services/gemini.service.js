@@ -17,10 +17,9 @@ function extractSqlFromText(text) {
   return withoutLabel.trim();
 }
 
-export async function callGeminiForSql({
-  userPrompt,
-  schema,
+export async function callGeminiChat({
   systemPrompt,
+  userPrompt,
   model,
 }) {
   if (!GEMINI_API_KEY) {
@@ -33,7 +32,7 @@ export async function callGeminiForSql({
     systemInstruction: systemPrompt,
   });
 
-  const prompt = buildUserMessage(userPrompt, schema);
+  const prompt = userPrompt.trim();
   const resp = await client.generateContent(prompt);
   const text =
     resp?.response?.text?.() ||
@@ -42,14 +41,33 @@ export async function callGeminiForSql({
       .join("\n");
   const content = typeof text === "string" ? text.trim() : "";
   if (!content) throw new Error("Gemini returned empty content");
+  return {
+    content,
+    response: resp,
+    request: { model: usedModel, prompt },
+    usage: undefined,
+  };
+}
+
+export async function callGeminiForSql({
+  userPrompt,
+  schema,
+  systemPrompt,
+  model,
+}) {
+  const { content, response, request, usage } = await callGeminiChat({
+    systemPrompt,
+    userPrompt: buildUserMessage(userPrompt, schema),
+    model,
+  });
   const sql = extractSqlFromText(content);
   if (!sql) throw new Error("Gemini response did not include SQL");
 
   return {
     sql,
     rawContent: content,
-    response: resp,
-    request: { model: usedModel, prompt },
-    usage: undefined,
+    response,
+    request,
+    usage,
   };
 }

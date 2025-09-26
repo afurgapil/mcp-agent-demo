@@ -24,21 +24,23 @@ function extractSqlFromText(text) {
   return withoutLabel.trim();
 }
 
-export async function callDeepseekForSql({
-  userPrompt,
-  schema,
+export async function callDeepseekChat({
   systemPrompt,
+  userPrompt,
   model,
+  temperature = 0,
 }) {
-  const messages = [
-    { role: "system", content: systemPrompt.trim() },
-    { role: "user", content: buildUserMessage(userPrompt, schema) },
-  ];
+  const messages = [];
+  if (systemPrompt && systemPrompt.trim()) {
+    messages.push({ role: "system", content: systemPrompt.trim() });
+  }
+  messages.push({ role: "user", content: (userPrompt || "").trim() });
 
+  const usedModel = model || DEEPSEEK_MODEL;
   const body = {
-    model: model || DEEPSEEK_MODEL,
+    model: usedModel,
     messages,
-    temperature: 0,
+    temperature,
     stream: false,
   };
   const endpoint = new URL(
@@ -80,11 +82,6 @@ export async function callDeepseekForSql({
     throw new Error("Deepseek returned empty content");
   }
 
-  const sql = extractSqlFromText(content);
-  if (!sql) {
-    throw new Error("Deepseek response did not include SQL");
-  }
-
   const usage = data?.usage || null;
   if (usage) {
     try {
@@ -96,5 +93,25 @@ export async function callDeepseekForSql({
     } catch {}
   }
 
-  return { sql, rawContent: content, response: data, request: body, usage };
+  return { content, response: data, request: body, usage };
+}
+
+export async function callDeepseekForSql({
+  userPrompt,
+  schema,
+  systemPrompt,
+  model,
+}) {
+  const { content, response, request, usage } = await callDeepseekChat({
+    systemPrompt: systemPrompt.trim(),
+    userPrompt: buildUserMessage(userPrompt, schema),
+    model,
+    temperature: 0,
+  });
+  const sql = extractSqlFromText(content);
+  if (!sql) {
+    throw new Error("Deepseek response did not include SQL");
+  }
+
+  return { sql, rawContent: content, response, request, usage };
 }
