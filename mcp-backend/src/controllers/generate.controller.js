@@ -11,6 +11,7 @@ import {
 import { callTool, listTools } from "../services/mcp.service.js";
 import { planToolUsage } from "../services/toolset.service.js";
 import { getIsDebugMode } from "./debug.controller.js";
+import { logTrainingExample } from "../services/training-log.service.js";
 
 async function executeSqlThroughMcp(sql) {
   const startedAt = Date.now();
@@ -258,6 +259,31 @@ export async function generateHandler(req, res) {
               };
             }
 
+            const metadata = {};
+            if (plannerResult.debug) {
+              metadata.plannerDebug = plannerResult.debug;
+            }
+            if (toolsetName) {
+              metadata.toolsetName = toolsetName;
+            }
+
+            await logTrainingExample({
+              prompt,
+              modelOutput: plannerResult.rawContent,
+              sql: null,
+              executionResult: toolResult,
+              hasError: false,
+              provider: useProvider,
+              model: modelToUse || null,
+              strategy: executionStrategy,
+              toolCall: toolCallInfo,
+              planner: plannerSummary,
+              schemaSource,
+              durationMs: debugInfo.totalDurationMs,
+              usage: plannerResult.usage || null,
+              metadata: Object.keys(metadata).length ? metadata : null,
+            });
+
             return sendJSON(res, 200, responsePayload);
           } catch (toolErr) {
             console.warn(
@@ -368,6 +394,31 @@ export async function generateHandler(req, res) {
       };
     }
 
+    const metadata = {};
+    if (plannerDetails?.debug) {
+      metadata.plannerDebug = plannerDetails.debug;
+    }
+    if (toolsetName) {
+      metadata.toolsetName = toolsetName;
+    }
+
+    await logTrainingExample({
+      prompt,
+      modelOutput: llmResponse.rawContent,
+      sql: llmResponse.sql,
+      executionResult,
+      hasError: false,
+      provider: useProvider,
+      model: modelToUse || null,
+      strategy: executionStrategy,
+      toolCall: toolCallInfo,
+      planner: plannerSummary,
+      schemaSource,
+      durationMs: debugInfo.totalDurationMs,
+      usage: llmResponse.usage || null,
+      metadata: Object.keys(metadata).length ? metadata : null,
+    });
+
     if (llmResponse.usage) {
       updateUsageCsv({
         promptTokens: llmResponse.usage.prompt_tokens,
@@ -382,6 +433,34 @@ export async function generateHandler(req, res) {
     console.error("Generation pipeline failed:", err.message);
     const duration = Date.now() - startTime;
     debugInfo.totalDurationMs = duration;
+    const errorMetadata = {};
+    if (plannerDetails?.debug) {
+      errorMetadata.plannerDebug = plannerDetails.debug;
+    }
+    if (toolsetName) {
+      errorMetadata.toolsetName = toolsetName;
+    }
+    if (err?.stack) {
+      errorMetadata.stack = err.stack;
+    }
+
+    await logTrainingExample({
+      prompt,
+      modelOutput: debugInfo.deepseek?.response || null,
+      sql: null,
+      executionResult: debugInfo.execution?.result || null,
+      hasError: true,
+      errorMessage: err.message,
+      provider: provider || null,
+      model: requestedModel || null,
+      strategy: executionStrategy,
+      toolCall: toolCallInfo,
+      planner: plannerSummary,
+      schemaSource,
+      durationMs: debugInfo.totalDurationMs,
+      usage: null,
+      metadata: Object.keys(errorMetadata).length ? errorMetadata : null,
+    });
     if (getIsDebugMode()) {
       return sendJSON(res, 500, {
         error: "Pipeline failed",

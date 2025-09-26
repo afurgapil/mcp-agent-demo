@@ -2,7 +2,11 @@
 
 import { ReactNode } from "react";
 
-const tabs: Array<{ id: "query" | "tools" | "config"; label: string; icon: ReactNode }> = [
+const tabs: Array<{
+  id: "query" | "tools" | "config";
+  label: string;
+  icon: ReactNode;
+}> = [
   { id: "query", label: "Query", icon: "🧠" },
   { id: "tools", label: "Tools", icon: "🛠️" },
   { id: "config", label: "Configuration", icon: "⚙️" },
@@ -63,8 +67,7 @@ export default function HomeHeader({
             }`}
           >
             <span className="flex items-center gap-2">
-              {debugMode ? "🟢" : "⚪"}
-              {debugMode ? "Debug On" : "Debug Off"}
+              {debugMode ? "🟢 Debug On" : "⚪ Debug Off"}
             </span>
           </button>
         </div>
