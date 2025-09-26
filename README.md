@@ -1,259 +1,231 @@
 # MCP Agent Demo — Natural Language to SQL Platform
 
 <div align="center">
-  <h3>AI-Powered Database Query Interface with MCP Integration</h3>
-  
-  [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
-  [![Node.js](https://img.shields.io/badge/Node.js-18-green?style=for-the-badge&logo=node.js)](https://nodejs.org/)
-  [![Google AI](https://img.shields.io/badge/Google_AI-Gemini-orange?style=for-the-badge&logo=google)](https://aistudio.google.com/)
-  [![MCP](https://img.shields.io/badge/MCP-Protocol-purple?style=for-the-badge)](https://modelcontextprotocol.io/)
+  <h3>AI-Powered SQL assistant with MCP integration, embedding-aware planning, and training telemetry</h3>
+
+<a href="https://nextjs.org/" target="_blank"><img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js" /></a>
+<a href="https://www.typescriptlang.org/" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript" /></a>
+<a href="https://nodejs.org/" target="_blank"><img alt="Node.js" src="https://img.shields.io/badge/Node.js-18-green?style=for-the-badge&logo=node.js" /></a>
+<a href="https://modelcontextprotocol.io/" target="_blank"><img alt="MCP" src="https://img.shields.io/badge/MCP-Protocol-purple?style=for-the-badge" /></a>
+
 </div>
 
 ## Overview
 
-MCP Agent Demo is a natural language to SQL platform with Model Context Protocol (MCP) integration. You can choose an AI provider (Deepseek, Gemini, or a custom GGUF API), generate SQL from natural language, execute via MCP, and view results in a clean UI.
+MCP Agent Demo turns natural language into executable SQL, routes database work through the Model Context Protocol, and keeps the whole experience observable. The platform now couples tool planning with an embedding service, persists end-to-end interactions for training, and exposes rich configuration controls in the UI.
 
-### Key Features
+### Core Capabilities
 
-- **Multiple Providers**: Deepseek, Gemini (Google AI Studio), or Custom GGUF HTTP API
-- **SQL Generation**: Natural language → SQL using your selected provider
-- **MCP Integration**: Execute SQL via MCP toolbox tools
-- **Toolset-Aware Routing**: Optionally let the assistant prefer MCP tools before falling back to raw SQL
-- **Modern UI**: Next.js + Tailwind, clean and responsive
-- **Reports**: Usage and schema summaries under `mcp-backend/reports/`
+- **Provider Flexibility** – Deepseek, Google Gemini, or any custom HTTP-compatible LLM.
+- **Tool-First Planner** – Optional planner ranks MCP tools with embeddings before falling back to raw SQL generation.
+- **Schema + Tool Snapshots** – `reports/schema.summary.json` and `reports/toolset.snapshot.json` drive schema awareness and embedding syncs.
+- **Training Telemetry** – Every request/response pair (prompt, SQL, execution result, usage, etc.) can be logged to MongoDB for downstream fine-tuning.
+- **Configurable UI & API** – Frontend configuration tab and `/api/config` endpoints keep providers, prompts, and toolset switches in sync; `/api/config/embed-sync` pushes snapshots to the embedding service on demand.
+- **Debuggable Flow** – Full planner traces, raw model outputs, execution metadata, and CSV usage reports make it easy to inspect behaviour.
 
 ## Architecture
 
 ```mermaid
 sequenceDiagram
     participant UI as Web UI (Next.js)
-    participant BE as Backend (Node.js)
-    participant LLM as Provider (Deepseek/Gemini/Custom)
+    participant BE as Backend (Express API)
+    participant Embed as Embedding Service (FastAPI)
+    participant LLM as SQL Model (Deepseek/Gemini/Custom)
     participant MCP as MCP Toolbox
-    participant DB as MySQL
+    participant DB as Target MySQL
+    participant Mongo as Training Logs (MongoDB)
 
-    UI->>BE: POST /api/generate {prompt, provider, model?}
-    BE->>LLM: Generate SQL
-    BE->>MCP: Execute SQL
-    MCP->>DB: Run query
-    DB-->>MCP: results
-    MCP-->>BE: results
-    BE-->>UI: payload + debug (optional)
+    UI->>BE: POST /api/generate { prompt, provider?, useToolset? }
+
+    alt Toolset enabled
+        BE->>Embed: POST /rank/tools \| /rank/tables
+        Embed-->>BE: Ranked tools + table hints
+        BE->>LLM: Planner prompt (tool definitions + schema)
+
+        alt Planner chooses tool
+            BE->>MCP: callTool(toolName, args)
+            MCP->>DB: Execute tool action
+            DB-->>MCP: Rows / effect
+            MCP-->>BE: Tool result
+        else Planner falls back
+            BE->>LLM: Generate SQL
+            BE->>MCP: mysql_execute_sql
+            MCP->>DB: Run SQL
+            DB-->>MCP: Rows / error
+            MCP-->>BE: SQL result / error
+        end
+
+    else Toolset disabled
+        BE->>LLM: Generate SQL
+        BE->>MCP: mysql_execute_sql
+        MCP->>DB: Run SQL
+        DB-->>MCP: Rows / error
+        MCP-->>BE: SQL result / error
+    end
+
+    BE->>Mongo: insert training_logs (async best-effort)
+    BE-->>UI: Response + debug payloads
+
 ```
 
-### Frontend
+Optional components (embedding service, MongoDB) are auto-detected—if they’re offline, the core SQL flow still works.
 
-- **Next.js 15** with App Router
-- **TypeScript**, **Tailwind CSS**
+## Repository Layout
 
-### Backend
-
-- **Node.js 18+** with ES modules
-- **Providers**: Deepseek, Gemini (Google AI), Custom GGUF API
-- **MCP SDK** for tool integration
-- **RESTful API** with proper error handling
-
-### Key Components
-
-- **Query Planning Engine**: AI translates natural language to SQL operations
-- **MCP Integration**: Dynamic tool discovery and execution
-- **Real-time Streaming**: Live progress updates via SSE
-- **Result Visualization**: Beautiful display of query results
+```
+├── mcp-backend/                    # Express server, MCP + provider orchestration
+│   ├── config.json                 # Persisted runtime configuration
+│   ├── reports/                    # Schema, toolset snapshots, provider usage CSV
+│   ├── scripts/                    # Helper scripts (schema export, toolset export)
+│   └── src/
+│       ├── controllers/            # Request handlers (config, generate, debug, tools)
+│       ├── routes/                 # Express routers
+│       ├── services/               # Provider integrations, MCP bridge, embeddings, logs
+│       └── db/                     # Mongo connection helper
+├── mcp-ui/                         # Next.js 15 App Router frontend
+│   ├── src/app/                    # Pages (home view slices: query, config, debug)
+│   ├── src/components/home/        # Query panel, results, debug cards, etc.
+│   └── src/services/api.ts         # REST client (config, generate, tool calls)
+├── tools.yaml                      # MCP toolbox configuration (not committed by default)
+├── tools.yaml.example              # Template toolbox configuration
+└── README.md
+```
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+- **Node.js 18+** and **npm 9+**
+- **MCP Toolbox** (toolbox CLI) with access to your database tools
+- **MySQL** database reachable by the toolbox
+- **Python 3.10+** (only if you plan to run the optional embedding FastAPI service)
+- **MongoDB** cluster or local instance (optional, used for training logs)
 
-- **Node.js** 18.0 or later
-- **npm** 9.0 or later
-- **MCP Toolbox** running locally
+## Backend Setup (`mcp-backend/`)
 
-## Quick Start
+1. **Install dependencies**
 
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/afurgapil/mcp-agent-demo.git
-cd mcp-agent-demo
-```
-
-### 2. Start MCP Toolbox
-
-In the repository root:
-
-```bash
-toolbox --ui
-```
-
-Access the toolbox UI at: `http://127.0.0.1:5000/ui`
-
-### 3. Configure Backend
-
-Create a `.env` file in `mcp-backend/`:
-
-```env
-# Gemini (optional)
-GEMINI_API_KEY=your_google_ai_api_key_here
-GEMINI_MODEL=gemini-1.5-pro
-
-# Deepseek (optional)
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-DEEPSEEK_API_BASE=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
-
-# Custom GGUF API (optional)
-CUSTOM_API_BASE=http://192.168.1.113:8000
-
-# MCP Toolbox
-MCP_TOOLBOX_URL=http://127.0.0.1:5000
-MCP_SSE_PATH=/sse
-
-# Server
-PORT=3001
-```
-
-### 4. Install and Start Backend
-
-```bash
-cd mcp-backend
-npm install
-npm run dev
-```
-
-Backend server will be available at: `http://localhost:3001`
-
-### 5. Configure and Start Frontend
-
-Create a `.env` file in `mcp-ui/`:
-
-```env
-NEXT_PUBLIC_API_BASE=http://localhost:3001
-```
-
-Install dependencies and start:
-
-```bash
-cd mcp-ui
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## Detailed Setup
-
-### Provider Setup
-
-- Gemini: set `GEMINI_API_KEY` (and optional `GEMINI_MODEL`)
-- Deepseek: set `DEEPSEEK_API_KEY` (and optional `DEEPSEEK_MODEL`, `DEEPSEEK_API_BASE`)
-- Custom GGUF: set `CUSTOM_API_BASE` or update via `PUT /api/config`
-
-### MCP Toolbox Configuration
-
-1. Ensure MCP Toolbox is running on the correct port
-2. Configure `MCP_TOOLBOX_URL` in backend `.env`
-3. If SSE path differs, adjust `MCP_SSE_PATH` (try `/sse`, `/mcp/sse`, `/mcp`, `/events`)
-
-### Database Configuration
-
-1. Configure your database connection in `tools.yaml`
-2. Use `tools.yaml.example` as a template:
    ```bash
-   cp tools.yaml.example tools.yaml
+   cd mcp-backend
+   npm install
    ```
-3. Fill in your database connection details
-4. Keep `tools.yaml` out of git for security
 
-### Toolset Planner (Optional)
+2. **Environment variables** – create `.env` with the settings you need:
 
-- Set `toolset.enabled` to `true` in `mcp-backend/config.json` (or via `PUT /api/config`) to activate tool-first routing
-- When enabled, the backend asks the LLM to inspect the active MCP toolset and choose a tool if it can satisfy the request
-- If no suitable tool is found or the tool call fails, the system falls back to the standard SQL generation flow
-- The frontend exposes a toggle so you can opt-in per request without changing the persisted configuration
+   ```env
+   PORT=3001
+   MCP_TOOLBOX_URL=http://127.0.0.1:5000
+   MCP_SSE_PATH=/sse
 
-## Features Deep Dive
+   # Provider credentials (enable what you use)
+   GEMINI_API_KEY=...
+   GEMINI_MODEL=gemini-1.5-pro
+   DEEPSEEK_API_KEY=...
+   DEEPSEEK_API_BASE=https://api.deepseek.com
+   DEEPSEEK_MODEL=deepseek-chat
+   CUSTOM_API_BASE=http://localhost:8002
 
-### SQL Generation
+   # Optional embedding-aware planning
+   EMBED_LLM_URL=http://localhost:8004
 
-The platform uses the selected provider to:
+   # Optional MongoDB training log storage
+   MONGO_URI=mongodb+srv://user:pass@cluster.example
+   MONGO_DB_NAME=mcp
+   MONGO_POOL_SIZE=5
+   ```
 
-- **Generate SQL** from natural language
-- **Execute** via MCP toolbox (e.g., `mysql_execute_sql`)
+   - If `EMBED_LLM_URL` is empty the planner still works, but without embedding ranking.
+   - If `MONGO_URI` is missing the app skips log persistence (you’ll see a console warning once).
 
-### MCP Integration
+3. **Generate snapshots** (recommended whenever the schema/toolset changes):
 
-- **Dynamic Tool Discovery**: Automatically discovers available tools
-- **Tool Execution**: Seamlessly executes tools via MCP protocol
-- **Error Handling**: Graceful handling of tool execution errors
-- **Real-time Updates**: Live progress via Server-Sent Events
-- **Toolset Planner (optional)**: Enable `toolset.enabled` to let the assistant pick a matching MCP tool before generating SQL
+   ```bash
+   npm run schema:mysql        # writes reports/schema.summary.json
+   npm run export:toolset      # writes reports/toolset.snapshot.json
+   ```
 
-### Security Features
+   These files are served to the LLM and pushed to the embedding service.
 
-- **Tool Allowlist**: Control which tools can be executed
-- **Input Validation**: Validate all user inputs
-- **Error Boundaries**: Graceful error handling and reporting
-- **Environment Isolation**: Secure configuration management
+4. **Run the server**
+   ```bash
+   npm run dev   # or npm start for production mode
+   ```
+   The API listens on `http://localhost:3001` by default.
 
-## Development
+### Optional Embedding Service
 
-### Project Structure
+Tool ranking expects a FastAPI service that exposes:
 
-```
-├── mcp-backend/                 # Backend Node.js API
-│   ├── index.js                 # Server bootstrap (Express)
-│   ├── src/
-│   │   ├── app/                 # Express app factory
-│   │   │   └── server.js
-│   │   ├── controllers/         # Route handlers (health, debug, tools, config, generate)
-│   │   ├── routes/              # Route modules (health, debug, tools, config, generate)
-│   │   ├── services/            # Core services (mcp, schema, config, deepseek, custom, gemini)
-│   │   └── utils/               # Utilities (response helpers, etc.)
-│   ├── reports/                 # Reports (schema.summary.json, deepseek_usage.csv)
-│   ├── scripts/                 # Helper scripts (e.g., generate-mysql-schema.js)
-│   ├── package.json             # Backend dependencies
-│   └── .env                     # Backend configuration
-├── mcp-ui/                      # Frontend Next.js app
-│   ├── src/
-│   │   ├── app/                 # Next.js App Router pages
-│   │   ├── components/          # UI components (DataTable, DebugJsonCard, ...)
-│   │   ├── services/            # API client (backend calls)
-│   │   └── utils/               # UI utilities (formatting, extractors)
-│   ├── package.json             # Frontend dependencies
-│   └── .env.local               # Frontend configuration
-├── tools.yaml               # MCP tools configuration
-├── tools.yaml.example       # Example tools configuration
-└── README.md               # This file
-```
+- `POST /embed` – body `{ "texts": string[] }`
+- `POST /rank/tools` – body `{ "prompt": string, "limit"?: number }`
+- `POST /rank/tables`
+- `PUT /config/toolset` / `PUT /config/schema`
+- `GET /toolset/info`
 
-### Adding New Tools
+The repo assumes you are running the companion service described in the local development notes (e.g., SentenceTransformer-based embedding or your own implementation). Start it and set `EMBED_LLM_URL` to its base URL (no trailing slash). Use `/api/config/embed-sync` from the UI or backend to push the latest snapshots.
 
-1. Define tools in `tools.yaml`
-2. Restart MCP Toolbox
-3. Tools will be automatically discovered by the backend
+### Training Logs
 
-### Customizing the UI
+If MongoDB is configured the backend writes documents to the `training_logs` collection with:
 
-1. Modify components in `mcp-ui/src/`
-2. Customize styling with Tailwind CSS
+- `prompt`, `modelOutput`, `sql`, `executionResult`
+- Provider/strategy metadata, tool call details
+- Error info, usage tokens, request duration
+
+The write is best-effort and runs after each response; failures are logged to the console without impacting the HTTP response.
+
+## Frontend Setup (`mcp-ui/`)
+
+1. **Install dependencies**
+
+   ```bash
+   cd mcp-ui
+   npm install
+   ```
+
+2. **Configure API base** – create `.env.local` if you need to customise it.
+
+   ```env
+   NEXT_PUBLIC_API_BASE=http://localhost:3001
+   ```
+
+3. **Run the app**
+   ```bash
+   npm run dev
+   ```
+   Visit [http://localhost:3000](http://localhost:3000) and toggle between the Query, Results, and Config sections.
+
+## Working with MCP & Toolsets
+
+- Define your MCP tools in `tools.yaml` (copy from `tools.yaml.example`).
+- Start the toolbox (`toolbox --ui`) so the backend can list tools and execute them.
+- The query panel contains a **“Prefer MCP tool execution”** toggle; either state is sent with the `POST /api/generate` request so you can experiment without touching persisted config.
+- The Config tab lets you edit system prompt, default provider, and toolset flags. Saving updates `config.json` and triggers an embedding sync when possible.
+
+## Key API Endpoints
+
+| Method & Path                 | Description                                                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/generate`          | Main entry point: accepts `{ prompt, provider?, model?, useToolset?, schema? }` and returns SQL, execution results, planner info, raw model output, etc. |
+| `GET /api/config`             | Fetch combined config plus embedding status (if configured).                                                                                             |
+| `PUT /api/config`             | Persist configuration changes; automatically pushes schema/tool snapshots to the embedding service.                                                      |
+| `POST /api/config/embed-sync` | Manually push the latest schema/toolset snapshots to the embedding service.                                                                              |
+| `GET /tools`                  | List current MCP tools detected via the toolbox.                                                                                                         |
+| `POST /tool`                  | Invoke an MCP tool directly with arbitrary arguments (used by the UI debug tab).                                                                         |
+| `POST /debug/toggle`          | Toggle verbose debug mode (streamed planner/tool info).                                                                                                  |
+
+## Observability & Reports
+
+- `mcp-backend/reports/deepseek_usage.csv` – provider token usage appended by `updateUsageCsv`.
+- `mcp-backend/reports/schema.summary.json` – latest schema snapshot consumed by the LLM and embedding service.
+- `mcp-backend/reports/toolset.snapshot.json` – exported tool metadata used for embeddings.
+- Debug mode surfaces planner decisions, token hints, tool arguments, and raw responses in the UI.
+
+## Development Tips
+
+- The backend uses ES modules; run scripts with `node --loader` defaults (already handled by npm scripts).
+- The frontend is built with Next.js 15, React 19, Tailwind CSS v4—most styling lives in component-level class names.
+- When modifying schema or tool definitions, regenerate snapshots and run `/api/config/embed-sync` to keep the embedding service aligned.
+- MongoDB writes happen on the request path; watch the console for `MongoDB connected for training logs.` to confirm connectivity.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## Support
-
-If you encounter any issues or have questions:
-
-1. Check the [Issues](https://github.com/afurgapil/mcp-agent-demo/issues) page
-2. Create a new issue with detailed information
-3. Join our community discussions
+Released under the [MIT License](LICENSE). Contributions and feature ideas are welcome—open an issue or submit a pull request.

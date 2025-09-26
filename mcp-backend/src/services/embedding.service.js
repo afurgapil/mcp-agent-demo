@@ -57,3 +57,16 @@ export async function getEmbeddingInfo() {
     return null;
   }
 }
+
+export async function embedTexts(texts) {
+  if (!EMBED_BASE) return null;
+  if (!Array.isArray(texts) || texts.length === 0) return null;
+  try {
+    const payload = { texts };
+    const response = await postJson("/embed", payload);
+    return response;
+  } catch (err) {
+    console.warn("Embedding request failed:", err.message);
+    return null;
+  }
+}

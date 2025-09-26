@@ -45,6 +45,8 @@ export async function callCustomChat({
   systemPrompt,
   userPrompt,
   apiBase,
+  temperature,
+  maxTokens,
 }) {
   const base = resolveApiBase(apiBase);
   const endpoint = new URL("/api/generate", base).toString();
@@ -59,7 +61,17 @@ export async function callCustomChat({
 
   const body = {
     message,
+    prompt: userPrompt,
   };
+  if (systemPrompt && systemPrompt.trim()) {
+    body.few_shot_prefix = systemPrompt.trim();
+  }
+  if (Number.isFinite(maxTokens)) {
+    body.max_new_tokens = Number(maxTokens);
+  }
+  if (Number.isFinite(temperature)) {
+    body.temperature = Number(temperature);
+  }
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -71,9 +83,10 @@ export async function callCustomChat({
     const msg = data?.detail?.[0]?.msg || data?.message || res.statusText;
     throw new Error(`Custom API error ${res.status}: ${msg}`);
   }
-
   const content =
-    (data && typeof data.response === "string" && data.response) || "";
+    (typeof data?.completion === "string" && data.completion) ||
+    (typeof data?.response === "string" && data.response) ||
+    "";
   if (!content) {
     throw new Error("Custom API returned empty response");
   }
@@ -82,7 +95,7 @@ export async function callCustomChat({
     content,
     response: data,
     request: body,
-    usage: undefined,
+    usage: data?.usage || undefined,
   };
 }
 
@@ -96,6 +109,7 @@ export async function callCustomForSql({
 
   const body = {
     message: buildUserMessage(userPrompt),
+    prompt: userPrompt,
   };
 
   const res = await fetch(new URL("/api/generate", base).toString(), {
@@ -110,7 +124,9 @@ export async function callCustomForSql({
   }
 
   const content =
-    (data && typeof data.response === "string" && data.response) || "";
+    (typeof data?.completion === "string" && data.completion) ||
+    (typeof data?.response === "string" && data.response) ||
+    "";
   if (!content) {
     throw new Error("Custom API returned empty response");
   }
