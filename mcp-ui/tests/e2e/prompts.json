@@ -1,0 +1,220 @@
+[
+  {
+    "prompt": "List all devices with their id, name, type, status, location, and created_at"
+  },
+  { "prompt": "Count total users" },
+  { "prompt": "List all users with role = 'admin'" },
+  {
+    "prompt": "Show distinct device types and how many devices each type has"
+  },
+  { "prompt": "Find all devices with status = 'inactive'" },
+  { "prompt": "List devices created in the last 7 days" },
+  {
+    "prompt": "Get the latest recorded signal per device (one row per device)"
+  },
+  { "prompt": "List temperature signals recorded today with value and unit" },
+  { "prompt": "Count signals per signal_type" },
+  { "prompt": "Find devices that have no signals" },
+  { "prompt": "Find signals that have no entries in signal_logs" },
+  { "prompt": "Get the most recent log entry for each signal" },
+  { "prompt": "List users who can_control at least one device" },
+  { "prompt": "For a given user_id = 3, list devices they can_view" },
+  { "prompt": "For each user, count how many devices they can_control" },
+  { "prompt": "List devices with their total number of associated signals" },
+  {
+    "prompt": "Find the average temperature value per device for the last 24 hours"
+  },
+  {
+    "prompt": "Show all motion signals with their device name and recorded_at"
+  },
+  { "prompt": "Top 5 devices with the most signal logs in the past week" },
+  { "prompt": "List devices located in 'Warehouse A' and currently active" },
+  { "prompt": "Find users who have permissions on devices of type 'camera'" },
+  { "prompt": "For each device type, show active vs inactive counts" },
+  {
+    "prompt": "List devices that were created before 2025-01-01 and are still 'maintenance'"
+  },
+  {
+    "prompt": "Show last recorded value for every temperature signal including unit"
+  },
+  { "prompt": "Find devices that have both temperature and motion signals" },
+  {
+    "prompt": "Count how many logs each day in the last 14 days (daily buckets)"
+  },
+  { "prompt": "List signals whose latest value equals 'ON'" },
+  { "prompt": "Find users without any device_permissions" },
+  {
+    "prompt": "Show users along with how many devices they can_view but cannot control"
+  },
+  { "prompt": "Devices with no location (NULL or empty string)" },
+  { "prompt": "List all locations with their latitude and longitude" },
+  {
+    "prompt": "Join locations to devices by matching devices.location = locations.name and list active devices with geo coords"
+  },
+  {
+    "prompt": "Find locations that have no devices assigned (by name match)"
+  },
+  { "prompt": "Devices created per month in the current year" },
+  {
+    "prompt": "Median time between consecutive logs per signal (MySQL 8 window functions)"
+  },
+  { "prompt": "Show the first and last log time per signal" },
+  { "prompt": "Find signals recorded between 2025-09-01 and 2025-09-30" },
+  {
+    "prompt": "List devices whose latest signal is older than 48 hours (stale)"
+  },
+  {
+    "prompt": "Show users with duplicate email domains and count per domain"
+  },
+  {
+    "prompt": "Find devices that changed status to 'maintenance' in the last 30 days (by created_at placeholder if no status history)"
+  },
+  {
+    "prompt": "List all enum values for devices.status observed in data and counts"
+  },
+  { "prompt": "Compute percentage of active devices among all devices" },
+  {
+    "prompt": "For each user, list the set of device_ids they can_control (comma-separated)"
+  },
+  {
+    "prompt": "Find signals with unit = '°C' or 'C' and show normalized temperature as numeric"
+  },
+  {
+    "prompt": "Find the maximum temperature recorded per device in the last 7 days"
+  },
+  { "prompt": "Find devices with at least 3 different signal types" },
+  { "prompt": "Show devices that have motion signals but zero motion logs" },
+  { "prompt": "List the 10 most recently created users" },
+  {
+    "prompt": "Find users with role IN ('operator','admin') who cannot control any device"
+  },
+  { "prompt": "For each device, show count of logs across all its signals" },
+  {
+    "prompt": "Detect signals with conflicting units for the same device and signal_type"
+  },
+  { "prompt": "Find devices with name LIKE '%gateway%'" },
+  { "prompt": "List all 'gateway' devices and the number of child signals" },
+  { "prompt": "Find devices in locations starting with 'Lab'" },
+  {
+    "prompt": "Show average logs per signal (total logs divided by signal count) per device"
+  },
+  { "prompt": "List users created this month" },
+  { "prompt": "Find devices with no permissions assigned to any user" },
+  {
+    "prompt": "Show which users have both can_view and can_control = 1 on the same device"
+  },
+  {
+    "prompt": "Count how many devices each user can_view but another user can_control (shared devices)"
+  },
+  { "prompt": "Find the most active signal (highest log count) overall" },
+  {
+    "prompt": "List signals with their most recent value from signal_logs.value if present, else from signals.value"
+  },
+  {
+    "prompt": "Show signals where the latest log value differs from the base signals.value"
+  },
+  {
+    "prompt": "Find devices whose latest signal is a motion event recorded today"
+  },
+  {
+    "prompt": "For a given device_id = 5, show its signals ordered by recorded_at desc"
+  },
+  { "prompt": "For a given user_id = 2, list devices they cannot view" },
+  { "prompt": "Show percentage of users by role" },
+  {
+    "prompt": "Find devices with status not in ('active','maintenance','inactive') (data quality check)"
+  },
+  { "prompt": "List signals recorded_at in the future (anomaly check)" },
+  { "prompt": "Find logs where recorded_at is NULL (data quality)" },
+  { "prompt": "Show top 10 devices by total unique days with logs" },
+  { "prompt": "Find devices with signals but zero logs in the past 30 days" },
+  {
+    "prompt": "For each location, count active devices (name match) and sort descending"
+  },
+  {
+    "prompt": "List device_permissions rows where can_view is NULL (should default to 1) or can_control is NULL"
+  },
+  { "prompt": "Find users who have permissions on more than 5 devices" },
+  {
+    "prompt": "Show devices that only admins can control (no operator has control)"
+  },
+  {
+    "prompt": "Find devices with mixed statuses in data (should be single status per device id)"
+  },
+  { "prompt": "For each signal_type, compute average time since last log" },
+  {
+    "prompt": "List the 50 most recent signal_logs with device and signal info"
+  },
+  {
+    "prompt": "Find devices whose name is duplicated (same name different id)"
+  },
+  { "prompt": "List users with email domain = 'example.com'" },
+  {
+    "prompt": "Show devices created between two dates (2025-09-01 and 2025-09-29)"
+  },
+  { "prompt": "Find devices with location IS NULL but have signals" },
+  { "prompt": "Show signals for devices of type 'sensor' only" },
+  {
+    "prompt": "For each user, list the first permission granted (min permission_id) and its device"
+  },
+  {
+    "prompt": "Find devices with zero permissions and mark them as 'orphaned' in output"
+  },
+  {
+    "prompt": "Show devices with at least one temperature > 80 in the last 24 hours"
+  },
+  {
+    "prompt": "Find the busiest hour of day by log count over the last week"
+  },
+  {
+    "prompt": "Compute rolling 1-hour log counts per signal (window function)"
+  },
+  { "prompt": "List signals whose unit is NULL" },
+  { "prompt": "Find devices where any signal value equals 'ERROR'" },
+  {
+    "prompt": "Show users who can_control a device but their role is 'viewer' (policy check)"
+  },
+  { "prompt": "For each device, list the last time any motion was detected" },
+  { "prompt": "Find devices that have never had a motion log" },
+  {
+    "prompt": "Show devices with status = 'maintenance' that still receive new logs"
+  },
+  { "prompt": "Count total signal logs per week for the last 12 weeks" },
+  { "prompt": "List devices and how many users can_view each one" },
+  {
+    "prompt": "Find signals created (recorded_at) before their device's created_at (temporal inconsistency)"
+  },
+  { "prompt": "Show top users by number of devices controlled (limit 10)" },
+  {
+    "prompt": "Find devices where permissions exist but the referenced user_id no longer exists (referential check)"
+  },
+  {
+    "prompt": "For each device type, show average time since device created_at"
+  },
+  { "prompt": "List devices whose name contains non-ASCII characters" },
+  {
+    "prompt": "Find devices with location matching any known locations table row (inner join by name)"
+  },
+  {
+    "prompt": "Show locations with average temperature over the last day (join via name)"
+  },
+  {
+    "prompt": "Find devices that had logs on 3 consecutive days in the past week"
+  },
+  { "prompt": "Show devices with more than 100 logs total" },
+  {
+    "prompt": "Find signals with more than 10 logs but recorded_at older than 30 days"
+  },
+  {
+    "prompt": "List the last 20 changes in signal value (by comparing consecutive logs) for a given signal_id = 7"
+  },
+  {
+    "prompt": "Find devices that have both active and maintenance statuses over time (if multiple rows exist; else none)"
+  },
+  {
+    "prompt": "Show users along with a boolean if they have any control on 'camera' devices"
+  },
+  {
+    "prompt": "Find devices whose names are similar (Levenshtein or LIKE variant) to 'GW-01'"
+  }
+]

@@ -8,7 +8,12 @@ import {
   SqlCard,
 } from "./QueryResults";
 import DebugPanel from "./DebugPanel";
-import { AppConfig, DebugPayload, PlannerSummary, ToolCallInfo } from "../../types/home";
+import {
+  AppConfig,
+  DebugPayload,
+  PlannerSummary,
+  ToolCallInfo,
+} from "../../types/home";
 import { schemaSourceLabel } from "../../utils/format";
 
 export default function QueryTab({
@@ -71,6 +76,7 @@ export default function QueryTab({
                 placeholder="e.g., Which customers purchased in the last 30 days?"
                 value={query}
                 onChange={(e) => onQueryChange(e.target.value)}
+                data-testid="prompt-input"
               />
             </div>
             <div className="bg-zinc-900/40 border border-zinc-800/60 rounded-2xl px-4 py-3 flex items-center justify-between gap-4">
@@ -79,11 +85,13 @@ export default function QueryTab({
                   Prefer MCP tool execution
                 </p>
                 <p className="text-xs text-zinc-400">
-                  When enabled, the assistant tries available tools before generating SQL.
+                  When enabled, the assistant tries available tools before
+                  generating SQL.
                 </p>
                 {useToolset && (
                   <p className="text-[11px] text-amber-300 mt-1">
-                    The embedding service must be running for toolset mode to work.{" "}
+                    The embedding service must be running for toolset mode to
+                    work.{" "}
                     {config?.embedding?.url
                       ? `(${config.embedding.url}${
                           config?.embedding?.status ? " online" : " unreachable"
@@ -108,6 +116,7 @@ export default function QueryTab({
               type="submit"
               className="px-8 py-3 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 text-white text-sm font-medium disabled:opacity-60 shadow-xl hover:shadow-2xl hover:scale-105 transition-all duration-300 transform disabled:hover:scale-100"
               disabled={loading || !query.trim()}
+              data-testid="submit-button"
             >
               <span className="flex items-center gap-2">
                 {loading ? (
@@ -133,7 +142,10 @@ export default function QueryTab({
 
       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
         {error && (
-          <div className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2">
+          <div
+            className="rounded-lg border border-red-800 bg-red-950 text-red-300 p-3 text-sm md:col-span-2"
+            data-testid="query-error"
+          >
             Error: {error}
           </div>
         )}
@@ -159,7 +171,8 @@ export default function QueryTab({
                 </p>
                 {toolCall?.name && (
                   <p className="mt-1 text-zinc-300">
-                    Tool used: <span className="font-medium">{toolCall.name}</span>
+                    Tool used:{" "}
+                    <span className="font-medium">{toolCall.name}</span>
                   </p>
                 )}
               </div>

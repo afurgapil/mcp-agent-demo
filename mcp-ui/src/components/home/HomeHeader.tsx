@@ -51,6 +51,7 @@ export default function HomeHeader({
             value={model}
             onChange={(e) => onModelChange(e.target.value)}
             title="Model"
+            data-testid="model-select"
           >
             <option value="">Default</option>
             <option value="deepseek-chat">deepseek-chat</option>
