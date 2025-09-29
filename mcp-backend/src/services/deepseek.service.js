@@ -1,3 +1,5 @@
+import { extractSqlFromText } from "./sql-extractor.js";
+
 const {
   DEEPSEEK_API_KEY,
   DEEPSEEK_API_BASE = "https://api.deepseek.com",
@@ -14,14 +16,6 @@ function buildUserMessage(userPrompt, schema) {
     return `Database schema:\n${schema.trim()}\n\nUser request:\n${userPrompt.trim()}`;
   }
   return userPrompt.trim();
-}
-
-function extractSqlFromText(text) {
-  if (!text) return "";
-  const fenceMatch = text.match(/```(?:sql)?\s*([\s\S]*?)```/i);
-  const raw = fenceMatch ? fenceMatch[1] : text;
-  const withoutLabel = raw.replace(/^SQL\s*[:\-]\s*/i, "");
-  return withoutLabel.trim();
 }
 
 export async function callDeepseekChat({

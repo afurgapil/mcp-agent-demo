@@ -1,33 +1,9 @@
+import { extractSqlFromText } from "./sql-extractor.js";
+
 const { CUSTOM_API_BASE } = process.env;
 
 function buildUserMessage(userPrompt) {
   return userPrompt.trim();
-}
-
-function extractSqlFromText(text) {
-  if (!text) return "";
-  // 1) Prefer explicit channel markers at the end like: "final|> ..." or "message|> ..."
-  const channelMatch = text.match(/(?:final\|>|message\|>)\s*([\s\S]*)$/i);
-  let candidate = channelMatch ? channelMatch[1] : text;
-
-  // Normalize: strip leading section labels such as "SQL:", "Query:", etc.
-  let normalized = candidate.replace(/^\s*(SQL|Query|Sorgu)\s*[:\-]\s*/i, "");
-
-  // If multiple statements or trailing explanations exist, keep only up to first semicolon
-  const semicolonIndex = normalized.indexOf(";");
-  const truncated =
-    semicolonIndex >= 0 ? normalized.slice(0, semicolonIndex + 1) : normalized;
-
-  // Final cleanup: remove code block adornments, markdown headers, comments, backticks; then trim
-  const cleaned = truncated
-    .replace(/```/g, "")
-    .replace(/^#+\s*/gm, "")
-    .replace(/^\s*--.*$/gm, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[`\s]+|[`\s]+$/g, "")
-    .trim();
-
-  return cleaned;
 }
 
 function resolveApiBase(apiBase) {
