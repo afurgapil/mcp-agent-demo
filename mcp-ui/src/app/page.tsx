@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import { getToken, getMe } from "../services/api";
+import { useRouter } from "next/navigation";
 import {
   getDebugStatus,
   toggleDebug as apiToggleDebug,
@@ -13,9 +15,7 @@ import {
 } from "../services/api";
 import HomeHeader from "../components/home/HomeHeader";
 import QueryTab from "../components/home/QueryTab";
-import ToolsPanel, {
-  type ToolDefinition,
-} from "../components/home/ToolsPanel";
+import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
 import ConfigurationPanel from "../components/home/ConfigurationPanel";
 import LoadingOverlay from "../components/home/LoadingOverlay";
 import type {
@@ -28,6 +28,7 @@ import type {
 const MODEL_STORAGE_KEY = "mcp_ui_model";
 
 export default function Home() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [customSchema, setCustomSchema] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,6 +40,11 @@ export default function Home() {
   const [schemaSource, setSchemaSource] = useState<string | null>(null);
 
   const [debugMode, setDebugMode] = useState(true);
+  const [me, setMe] = useState<{
+    name?: string;
+    company?: { name?: string } | null;
+    branch?: { name?: string } | null;
+  } | null>(null);
   const [debugData, setDebugData] = useState<DebugPayload | null>(null);
   const [model, setModel] = useState<string>(() => {
     try {
@@ -56,9 +62,21 @@ export default function Home() {
   }, [model]);
 
   useEffect(() => {
+    // Redirect if unauthenticated
+    try {
+      const token = getToken();
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
+    } catch {}
+
     getDebugStatus()
       .then((d) => setDebugMode(!!d.debugMode))
       .catch(() => {});
+    getMe()
+      .then((d) => setMe(d.user || null))
+      .catch(() => setMe(null));
     try {
       const savedModel =
         typeof window !== "undefined"
@@ -236,16 +254,18 @@ export default function Home() {
     setToolsError(null);
     try {
       const data = await apiFetchTools();
-      const normalized = (data.tools || []).map((tool: Record<string, unknown>) => {
-        const inputSchema =
-          (tool as Record<string, unknown>).inputSchema ||
-          (tool as Record<string, unknown>).input_schema ||
-          null;
-        return {
-          ...tool,
-          inputSchema,
-        };
-      }) as ToolDefinition[];
+      const normalized = (data.tools || []).map(
+        (tool: Record<string, unknown>) => {
+          const inputSchema =
+            (tool as Record<string, unknown>).inputSchema ||
+            (tool as Record<string, unknown>).input_schema ||
+            null;
+          return {
+            ...tool,
+            inputSchema,
+          };
+        }
+      ) as ToolDefinition[];
       setTools(normalized);
     } catch (err: unknown) {
       console.warn("Tools fetch failed:", err);
@@ -417,6 +437,8 @@ export default function Home() {
           onToggleDebug={toggleDebugMode}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          companyName={me?.company?.name || null}
+          branchName={me?.branch?.name || null}
         />
 
         {activeTab === "query" && (

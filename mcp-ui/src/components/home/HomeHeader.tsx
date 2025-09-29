@@ -19,6 +19,8 @@ export default function HomeHeader({
   onToggleDebug,
   activeTab,
   onTabChange,
+  companyName,
+  branchName,
 }: {
   model: string;
   onModelChange: (value: string) => void;
@@ -26,6 +28,8 @@ export default function HomeHeader({
   onToggleDebug: () => void;
   activeTab: "query" | "tools" | "config";
   onTabChange: (tab: "query" | "tools" | "config") => void;
+  companyName?: string | null;
+  branchName?: string | null;
 }) {
   return (
     <header className="mb-8">
@@ -46,6 +50,13 @@ export default function HomeHeader({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {(companyName || branchName) && (
+            <div className="text-xs px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50 text-zinc-300">
+              <span>{companyName || "Firma"}</span>
+              {branchName ? <span className="mx-1">/</span> : null}
+              <span>{branchName || null}</span>
+            </div>
+          )}
           <select
             className="text-xs px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50 text-zinc-200"
             value={model}
@@ -71,6 +82,12 @@ export default function HomeHeader({
               {debugMode ? "🟢 Debug On" : "⚪ Debug Off"}
             </span>
           </button>
+          <a
+            href="/logout"
+            className="text-xs px-4 py-2 rounded-xl bg-red-600/90 hover:bg-red-500 border border-red-500/60 text-white"
+          >
+            Çıkış
+          </a>
         </div>
       </div>
 

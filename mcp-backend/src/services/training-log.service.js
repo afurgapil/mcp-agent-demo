@@ -1,6 +1,27 @@
 import mongoose from "mongoose";
 import { isMongoReady, connectMongo } from "../db/mongoose.js";
 
+function getCircularReplacer() {
+  const seen = new WeakSet();
+  return function replacer(_key, value) {
+    if (typeof value === "object" && value !== null) {
+      if (seen.has(value)) return "[Circular]";
+      seen.add(value);
+    }
+    if (typeof value === "function") return undefined;
+    return value;
+  };
+}
+
+function safeClone(value) {
+  if (value === null || value === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(value, getCircularReplacer()));
+  } catch (_err) {
+    return null;
+  }
+}
+
 const TrainingLogSchema = new mongoose.Schema(
   {
     prompt: { type: String, required: true },
@@ -18,6 +39,11 @@ const TrainingLogSchema = new mongoose.Schema(
     durationMs: { type: Number, default: null },
     usage: { type: mongoose.Schema.Types.Mixed, default: null },
     metadata: { type: mongoose.Schema.Types.Mixed, default: null },
+    requesterUserId: { type: String, default: null },
+    requesterCompanyId: { type: String, default: null },
+    requesterBranchId: { type: String, default: null },
+    requesterCompanyName: { type: String, default: null },
+    requesterBranchName: { type: String, default: null },
   },
   {
     timestamps: true,
@@ -46,23 +72,28 @@ export async function logTrainingExample(entry) {
   const TrainingLog = getTrainingLogModel();
   const payload = {
     prompt: entry.prompt,
-    modelOutput: entry.modelOutput ?? null,
+    modelOutput: safeClone(entry.modelOutput),
     sql: entry.sql ?? null,
-    executionResult: entry.executionResult ?? null,
+    executionResult: safeClone(entry.executionResult),
     hasError: Boolean(entry.hasError),
     errorMessage: entry.errorMessage || null,
     provider: entry.provider || null,
     model: entry.model || null,
     strategy: entry.strategy || null,
-    toolCall: entry.toolCall || null,
-    planner: entry.planner || null,
+    toolCall: safeClone(entry.toolCall),
+    planner: safeClone(entry.planner),
     schemaSource: entry.schemaSource || null,
     durationMs:
       typeof entry.durationMs === "number" && Number.isFinite(entry.durationMs)
         ? entry.durationMs
         : null,
-    usage: entry.usage || null,
-    metadata: entry.metadata || null,
+    usage: safeClone(entry.usage),
+    metadata: safeClone(entry.metadata),
+    requesterUserId: entry.requesterUserId || null,
+    requesterCompanyId: entry.requesterCompanyId || null,
+    requesterBranchId: entry.requesterBranchId || null,
+    requesterCompanyName: entry.requesterCompanyName || null,
+    requesterBranchName: entry.requesterBranchName || null,
   };
 
   try {

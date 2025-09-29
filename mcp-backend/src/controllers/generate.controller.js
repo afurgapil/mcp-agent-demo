@@ -13,6 +13,76 @@ import { planToolUsage } from "../services/toolset.service.js";
 import { getIsDebugMode } from "./debug.controller.js";
 import { logTrainingExample } from "../services/training-log.service.js";
 
+function valueToId(value, seen = new WeakSet()) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "object") {
+    if (seen.has(value)) return null;
+    seen.add(value);
+
+    // If it's a Mongoose ObjectId-like
+    if (typeof value.toHexString === "function") {
+      try {
+        return value.toHexString();
+      } catch {}
+    }
+    if (typeof value.valueOf === "function") {
+      const v = value.valueOf();
+      if (typeof v === "string") return v;
+    }
+
+    // If it has _id, avoid recursing if _id references itself
+    if (value._id && value._id !== value) {
+      const inner = value._id;
+      if (typeof inner === "string") return inner;
+      if (typeof inner === "object") {
+        if (typeof inner.toHexString === "function") {
+          try {
+            return inner.toHexString();
+          } catch {}
+        }
+        if (typeof inner.valueOf === "function") {
+          const iv = inner.valueOf();
+          if (typeof iv === "string") return iv;
+        }
+      }
+    }
+
+    if (typeof value.toString === "function") {
+      const str = value.toString();
+      return str === "[object Object]" ? null : str;
+    }
+  }
+  return null;
+}
+
+function buildRequesterMetadata(req) {
+  const user = req?.user;
+  if (!user) {
+    return null;
+  }
+
+  const company = user.company || null;
+  const branch = user.branch || null;
+  const metadata = {
+    id: valueToId(user._id),
+    email: user.email || null,
+    role: user.role || null,
+    companyId: valueToId(company),
+    branchId: valueToId(branch),
+  };
+
+  if (company && typeof company === "object" && !Array.isArray(company)) {
+    metadata.companyName = company.name || null;
+  }
+  if (branch && typeof branch === "object" && !Array.isArray(branch)) {
+    metadata.branchName = branch.name || null;
+  }
+
+  return metadata;
+}
+
 async function executeSqlThroughMcp(sql) {
   const startedAt = Date.now();
   const result = await callTool("mysql_execute_sql", { sql });
@@ -37,6 +107,7 @@ export async function reloadSchema(req, res) {
 
 export async function generateHandler(req, res) {
   const body = req.body || {};
+  const requesterMetadata = buildRequesterMetadata(req);
   const {
     prompt,
     schema: customSchema,
@@ -266,6 +337,9 @@ export async function generateHandler(req, res) {
             if (toolsetName) {
               metadata.toolsetName = toolsetName;
             }
+            if (requesterMetadata) {
+              metadata.requester = requesterMetadata;
+            }
 
             await logTrainingExample({
               prompt,
@@ -287,9 +361,7 @@ export async function generateHandler(req, res) {
             return sendJSON(res, 200, responsePayload);
           } catch (toolErr) {
             console.warn(
-              `Tool execution via planner failed (${plannerResult.tool.name}): ${
-                toolErr.message
-              }`
+              `Tool execution via planner failed (${plannerResult.tool.name}): ${toolErr.message}`
             );
             executionStrategy = "sql";
             debugInfo.execution = {
@@ -401,6 +473,9 @@ export async function generateHandler(req, res) {
     if (toolsetName) {
       metadata.toolsetName = toolsetName;
     }
+    if (requesterMetadata) {
+      metadata.requester = requesterMetadata;
+    }
 
     await logTrainingExample({
       prompt,
@@ -417,6 +492,11 @@ export async function generateHandler(req, res) {
       durationMs: debugInfo.totalDurationMs,
       usage: llmResponse.usage || null,
       metadata: Object.keys(metadata).length ? metadata : null,
+      requesterUserId: requesterMetadata?.id || null,
+      requesterCompanyId: requesterMetadata?.companyId || null,
+      requesterBranchId: requesterMetadata?.branchId || null,
+      requesterCompanyName: requesterMetadata?.companyName || null,
+      requesterBranchName: requesterMetadata?.branchName || null,
     });
 
     if (llmResponse.usage) {
@@ -442,6 +522,9 @@ export async function generateHandler(req, res) {
     }
     if (err?.stack) {
       errorMetadata.stack = err.stack;
+    }
+    if (requesterMetadata) {
+      errorMetadata.requester = requesterMetadata;
     }
 
     await logTrainingExample({
