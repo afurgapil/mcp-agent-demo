@@ -52,6 +52,34 @@ function toNumeric(value: unknown): number | null {
   return null;
 }
 
+function isDateLike(value: unknown): boolean {
+  if (!value) return false;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value === "string") {
+    const t = Date.parse(value);
+    return Number.isFinite(t);
+  }
+  return false;
+}
+
+function distinctCount(values: unknown[], limit = 1000): number {
+  const set = new Set<unknown>();
+  for (let i = 0; i < values.length && set.size <= limit; i++) {
+    set.add(values[i]);
+  }
+  return set.size;
+}
+
+function isIdKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return (
+    lower === "id" ||
+    lower.endsWith("_id") ||
+    lower.endsWith("id") ||
+    lower.includes("uuid")
+  );
+}
+
 function palette(count: number): string[] {
   const base = [
     "#60a5fa",
@@ -100,16 +128,29 @@ export function DataChart({ rows }: { rows: Row[] }) {
   }, [rows]);
 
   const numericColumns = useMemo(() => {
-    return columns.filter((key) => rows.some((row) => isNumeric(row[key])));
+    return columns.filter(
+      (key) => rows.some((row) => isNumeric(row[key])) && !isIdKey(key)
+    );
   }, [columns, rows]);
+
+  const dateLikeColumns = useMemo(() => {
+    return columns.filter((key) => rows.some((row) => isDateLike(row[key])));
+  }, [columns, rows]);
+
+  const categoricalColumns = useMemo(() => {
+    return columns.filter((key) => !numericColumns.includes(key));
+  }, [columns, numericColumns]);
 
   useEffect(() => {
     if (!columns.length) {
       setLabelKey(null);
       return;
     }
-    setLabelKey((prev) => (prev && columns.includes(prev) ? prev : columns[0]));
-  }, [columns]);
+    // Prefer date-like column as label, else first categorical, else first column
+    const preferred =
+      dateLikeColumns[0] || categoricalColumns[0] || columns[0] || null;
+    setLabelKey((prev) => (prev && columns.includes(prev) ? prev : preferred));
+  }, [columns, dateLikeColumns, categoricalColumns]);
 
   useEffect(() => {
     setValueKeys((prev) => {
@@ -120,36 +161,64 @@ export function DataChart({ rows }: { rows: Row[] }) {
     });
   }, [numericColumns]);
 
+  // Suggest chart type automatically based on detected types
+  useEffect(() => {
+    setChartType((prev) => {
+      if (prev) return prev;
+      const hasDateX = labelKey
+        ? rows.some((r) => isDateLike(r[labelKey!]))
+        : false;
+      if (hasDateX && (valueKeys.length > 0 || numericColumns.length > 0)) {
+        return "line";
+      }
+      const catCardinality = labelKey
+        ? distinctCount(rows.map((r) => r[labelKey!]))
+        : Infinity;
+      if (
+        catCardinality <= 20 &&
+        (valueKeys.length > 0 || numericColumns.length > 0)
+      ) {
+        return "bar";
+      }
+      if (valueKeys.length === 1 && rows.length <= 30) {
+        return "pie";
+      }
+      return "bar";
+    });
+  }, [labelKey, valueKeys, numericColumns, rows]);
+
   const labels = useMemo(() => {
     if (!labelKey) return [];
     return rows.map((row) => formatCell(row[labelKey]));
   }, [rows, labelKey]);
 
-  const chartData = useMemo<ChartData<ChartType, (number | null)[], string> | null>(() => {
-    if (!labelKey || !rows.length) return null;
-
-    if (chartType === "pie") {
-      const valueKey = valueKeys[0];
-      if (!valueKey) return null;
-      const data = rows.map((row) => toNumeric(row[valueKey]));
-      const usable = data.some((d) => d !== null);
-      if (!usable) return null;
-      const colors = palette(rows.length || 1);
+  // Build chart data for bar/line
+  const chartDataCartesian = useMemo<
+    ChartData<"bar", (number | null)[], string>
+  >(() => {
+    if (!labelKey || !rows.length) return { labels: [], datasets: [] };
+    const activeKeys = valueKeys.length ? valueKeys : numericColumns;
+    if (!activeKeys.length) {
+      const labelsMap = new Map<string, number>();
+      rows.forEach((row) => {
+        const l = String(formatCell(row[labelKey]));
+        labelsMap.set(l, (labelsMap.get(l) || 0) + 1);
+      });
+      const labelsArr = Array.from(labelsMap.keys());
+      const counts = labelsArr.map((l) => labelsMap.get(l) || 0);
+      const colors = palette(1);
       return {
-        labels,
+        labels: labelsArr,
         datasets: [
           {
-            label: valueKey,
-            data: data.map((d) => (d == null ? 0 : d)),
-            backgroundColor: colors,
-            borderColor: colors.map((c) => c + "cc"),
+            label: "count",
+            data: counts,
+            backgroundColor: colors[0] + "b3",
+            borderColor: colors[0],
           },
         ],
       };
     }
-
-    const activeKeys = valueKeys.length ? valueKeys : numericColumns;
-    if (!activeKeys.length) return null;
     const colors = palette(activeKeys.length);
     return {
       labels,
@@ -159,68 +228,106 @@ export function DataChart({ rows }: { rows: Row[] }) {
           label: key,
           data: data.map((d) => (d == null ? null : d)),
           borderColor: colors[idx],
-          backgroundColor:
-            chartType === "bar" ? colors[idx] + "b3" : colors[idx],
-          fill: chartType === "line",
-          tension: chartType === "line" ? 0.35 : undefined,
+          backgroundColor: colors[idx] + "b3",
         };
       }),
     };
-  }, [chartType, labelKey, labels, rows, valueKeys, numericColumns]);
+  }, [labelKey, labels, rows, valueKeys, numericColumns]);
 
-  const options = useMemo<ChartOptions<ChartType>>(() => {
-    const shared = {
+  // Build chart data for pie
+  const chartDataPie = useMemo<ChartData<
+    "pie",
+    number[],
+    string
+  > | null>(() => {
+    if (!labelKey || !rows.length) return null;
+    const valueKey = valueKeys[0];
+    if (!valueKey) return null;
+    const nums = rows.map((row) => toNumeric(row[valueKey]));
+    const usable = nums.some((n) => n !== null);
+    if (!usable) return null;
+    const colors = palette(rows.length || 1);
+    return {
+      labels,
+      datasets: [
+        {
+          label: valueKey,
+          data: nums.map((n) => (n == null ? 0 : n)),
+          backgroundColor: colors,
+          borderColor: colors.map((c) => c + "cc"),
+        },
+      ],
+    };
+  }, [labelKey, rows, valueKeys, labels]);
+
+  const optionsBar = useMemo<ChartOptions<"bar">>(
+    () => ({
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: {
-          labels: {
-            color: "#e5e7eb",
-          },
-        },
+        legend: { labels: { color: "#e5e7eb" } },
         tooltip: {
           callbacks: {
             label: (context) => {
               const label = context.dataset?.label ?? "";
-              const value =
-                chartType === "pie"
-                  ? context.parsed
-                  : (context.parsed as { y?: number })?.y;
+              const value = (context.parsed as { y?: number })?.y;
               return `${label ? `${label}: ` : ""}${value ?? "-"}`;
             },
           },
         },
       },
-    } satisfies ChartOptions<ChartType>;
-
-    if (chartType === "pie") {
-      return shared;
-    }
-
-    return {
-      ...shared,
       scales: {
         x: {
-          ticks: {
-            color: "#9ca3af",
-            maxRotation: 45,
-            minRotation: 0,
-          },
-          grid: {
-            color: "rgba(148, 163, 184, 0.1)",
-          },
+          ticks: { color: "#9ca3af", maxRotation: 45, minRotation: 0 },
+          grid: { color: "rgba(148, 163, 184, 0.1)" },
         },
         y: {
-          ticks: {
-            color: "#9ca3af",
-          },
-          grid: {
-            color: "rgba(148, 163, 184, 0.1)",
+          ticks: { color: "#9ca3af" },
+          grid: { color: "rgba(148, 163, 184, 0.1)" },
+        },
+      },
+    }),
+    []
+  );
+
+  const optionsLine = useMemo<ChartOptions<"line">>(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: "#e5e7eb" } },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const label = context.dataset?.label ?? "";
+              const value = (context.parsed as { y?: number })?.y;
+              return `${label ? `${label}: ` : ""}${value ?? "-"}`;
+            },
           },
         },
       },
-    } satisfies ChartOptions<ChartType>;
-  }, [chartType]);
+      scales: {
+        x: {
+          ticks: { color: "#9ca3af", maxRotation: 45, minRotation: 0 },
+          grid: { color: "rgba(148, 163, 184, 0.1)" },
+        },
+        y: {
+          ticks: { color: "#9ca3af" },
+          grid: { color: "rgba(148, 163, 184, 0.1)" },
+        },
+      },
+    }),
+    []
+  );
+
+  const optionsPie = useMemo<ChartOptions<"pie">>(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#e5e7eb" } } },
+    }),
+    []
+  );
 
   if (!rows.length) {
     return (
@@ -232,7 +339,9 @@ export function DataChart({ rows }: { rows: Row[] }) {
 
   if (!columns.length) {
     return (
-      <div className="text-xs text-gray-500">No columns found in the dataset</div>
+      <div className="text-xs text-gray-500">
+        No columns found in the dataset
+      </div>
     );
   }
 
@@ -244,7 +353,11 @@ export function DataChart({ rows }: { rows: Row[] }) {
     );
   }
 
-  if (!chartData) {
+  if (
+    (chartType === "pie" && !chartDataPie) ||
+    (chartType !== "pie" &&
+      (!chartDataCartesian || chartDataCartesian.datasets.length === 0))
+  ) {
     if (!numericColumns.length) {
       return (
         <div className="text-xs text-gray-500">No numeric columns found</div>
@@ -261,7 +374,9 @@ export function DataChart({ rows }: { rows: Row[] }) {
 
     if (chartType !== "pie" && !valueKeys.length) {
       return (
-        <div className="text-xs text-gray-500">Select at least one numeric column</div>
+        <div className="text-xs text-gray-500">
+          Select at least one numeric column
+        </div>
       );
     }
 
@@ -271,8 +386,6 @@ export function DataChart({ rows }: { rows: Row[] }) {
       </div>
     );
   }
-
-  const ChartComponent = chartType === "bar" ? Bar : chartType === "line" ? Line : Pie;
 
   return (
     <div className="mt-3 space-y-4">
@@ -367,11 +480,25 @@ export function DataChart({ rows }: { rows: Row[] }) {
         )}
       </div>
       <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-4">
-        <ChartComponent
-          data={chartData}
-          options={options}
-          height={360}
-        />
+        {chartType === "bar" && (
+          <Bar data={chartDataCartesian} options={optionsBar} height={360} />
+        )}
+        {chartType === "line" && (
+          <Line
+            data={
+              chartDataCartesian as unknown as ChartData<
+                "line",
+                (number | null)[],
+                string
+              >
+            }
+            options={optionsLine}
+            height={360}
+          />
+        )}
+        {chartType === "pie" && chartDataPie && (
+          <Pie data={chartDataPie} options={optionsPie} height={360} />
+        )}
       </div>
     </div>
   );
