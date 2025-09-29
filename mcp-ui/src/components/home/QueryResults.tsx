@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DataTable } from "..";
+import { DataChart, DataTable } from "..";
 import { extractRows } from "../../utils/format";
 import { PlannerSummary, ToolCallInfo } from "../../types/home";
 
@@ -16,7 +16,7 @@ export function ExecutionResultCard({
   strategy?: "tool" | "sql" | null;
   toolCall?: ToolCallInfo | null;
 }) {
-  const [tab, setTab] = useState<"table" | "json">("table");
+  const [tab, setTab] = useState<"table" | "chart" | "json">("table");
   const rows = useMemo(() => extractRows(result), [result]);
   const title =
     strategy === "tool"
@@ -42,6 +42,17 @@ export function ExecutionResultCard({
             }`}
           >
             Table
+          </button>
+          <button
+            onClick={() => setTab("chart")}
+            className={`px-2 py-1 rounded ${
+              tab === "chart"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-200 dark:bg-gray-800"
+            }`}
+            disabled={rows.length === 0}
+          >
+            Chart
           </button>
           <button
             onClick={() => setTab("json")}
@@ -79,6 +90,8 @@ export function ExecutionResultCard({
           ) : (
             <div className="text-xs text-gray-500">No table data to display</div>
           )
+        ) : tab === "chart" ? (
+          <DataChart rows={rows} />
         ) : (
           <pre className="text-xs whitespace-pre-wrap break-words">
             {JSON.stringify(result ?? {}, null, 2)}
