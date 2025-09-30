@@ -4,9 +4,11 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  timeout: 90_000,
+  // Disable test-level timeouts to allow AI to respond without limit
+  timeout: 0,
   expect: {
-    timeout: 60_000,
+    // Disable expect timeouts as well
+    timeout: 0,
   },
   retries: process.env.CI ? 1 : 0,
   use: {
