@@ -195,3 +195,49 @@ export async function getMe(): Promise<MeResponse> {
   }
   return (data || { user: null }) as MeResponse;
 }
+
+export type SavedPrompt = {
+  _id?: string;
+  title: string;
+  category: string;
+  prompt: string;
+  sql?: string | null;
+  modelOutput?: string | null;
+  createdAt?: string;
+};
+
+export async function fetchPrompts(): Promise<{ prompts: SavedPrompt[] }> {
+  const res = await fetch(`${API_BASE}/prompts`, {
+    headers: withAuth(),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    prompts?: SavedPrompt[];
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data?.error || "Failed to load prompts");
+  }
+  return { prompts: data.prompts || [] };
+}
+
+export async function createPrompt(body: {
+  title: string;
+  category: string;
+  prompt: string;
+  sql?: string | null;
+  modelOutput?: string | null;
+}): Promise<{ prompt: SavedPrompt }> {
+  const res = await fetch(`${API_BASE}/prompts`, {
+    method: "POST",
+    headers: withAuth({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    prompt?: SavedPrompt;
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data?.error || "Failed to save prompt");
+  }
+  return { prompt: data.prompt as SavedPrompt };
+}

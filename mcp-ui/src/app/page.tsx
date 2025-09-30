@@ -13,6 +13,7 @@ import {
 import HomeHeader from "../components/home/HomeHeader";
 import QueryTab from "../components/home/QueryTab";
 import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
+import SavedPrompts from "../components/home/SavedPrompts";
 // import ConfigurationPanel from "../components/home/ConfigurationPanel";
 import LoadingOverlay from "../components/home/LoadingOverlay";
 import type { DebugPayload, PlannerSummary, ToolCallInfo } from "../types/home";
@@ -98,7 +99,9 @@ export default function Home() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"query" | "tools">("query");
+  const [activeTab, setActiveTab] = useState<"query" | "tools" | "saved">(
+    "query"
+  );
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -414,6 +417,8 @@ export default function Home() {
             onToggleCategory={toggleCategory}
           />
         )}
+
+        {activeTab === "saved" && <SavedPrompts />}
 
         {/* config tab removed */}
       </div>

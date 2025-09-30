@@ -109,11 +109,13 @@ export function SqlCard({
   loading,
   schemaSource,
   schemaSourceLabelValue,
+  onSave,
 }: {
   sql: string;
   loading?: boolean;
   schemaSource?: string | null;
   schemaSourceLabelValue: (source?: string | null) => string | null;
+  onSave?: () => void;
 }) {
   const showSource = schemaSource && schemaSource !== "none";
   const sourceLabel = showSource ? schemaSourceLabelValue(schemaSource) : null;
@@ -124,13 +126,24 @@ export function SqlCard({
     >
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-semibold text-blue-100">Generated SQL</h2>
-        <button
-          className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-100 border border-blue-500/40 hover:bg-blue-500/30"
-          onClick={() => navigator.clipboard?.writeText(sql)}
-          disabled={loading}
-        >
-          Copy
-        </button>
+        <div className="flex gap-2">
+          {onSave && (
+            <button
+              className="text-xs px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-100 border border-emerald-500/40 hover:bg-emerald-500/30"
+              onClick={onSave}
+              disabled={loading}
+            >
+              Save
+            </button>
+          )}
+          <button
+            className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-100 border border-blue-500/40 hover:bg-blue-500/30"
+            onClick={() => navigator.clipboard?.writeText(sql)}
+            disabled={loading}
+          >
+            Copy
+          </button>
+        </div>
       </div>
       {sourceLabel && (
         <div className="text-xs text-blue-200 mb-2">

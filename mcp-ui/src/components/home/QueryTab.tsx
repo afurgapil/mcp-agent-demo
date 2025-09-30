@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent } from "react";
+import { FormEvent, useState } from "react";
 import {
   ExecutionResultCard,
   ModelOutputCard,
@@ -10,6 +10,8 @@ import {
 import DebugPanel from "./DebugPanel";
 import { DebugPayload, PlannerSummary, ToolCallInfo } from "../../types/home";
 import { schemaSourceLabel } from "../../utils/format";
+import { SavePromptModal } from "..";
+import { createPrompt } from "../../services/api";
 
 export default function QueryTab({
   query,
@@ -54,6 +56,29 @@ export default function QueryTab({
   onClearDebug: () => void;
   onClear: () => void;
 }) {
+  const [showSave, setShowSave] = useState(false);
+  const canSave = !!(generatedSql || modelOutput);
+
+  async function handleSave({
+    title,
+    category,
+  }: {
+    title: string;
+    category: string;
+  }) {
+    if (!canSave) return;
+    try {
+      await createPrompt({
+        title,
+        category,
+        prompt: query,
+        sql: generatedSql || null,
+        modelOutput: modelOutput || null,
+      });
+    } finally {
+      setShowSave(false);
+    }
+  }
   return (
     <>
       <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl">
@@ -173,6 +198,7 @@ export default function QueryTab({
             loading={loading}
             schemaSource={schemaSource}
             schemaSourceLabelValue={schemaSourceLabel}
+            onSave={canSave ? () => setShowSave(true) : undefined}
           />
         )}
 
@@ -204,6 +230,14 @@ export default function QueryTab({
           <DebugPanel debug={debugData} onClearDebug={onClearDebug} />
         </div>
       )}
+
+      <SavePromptModal
+        open={showSave}
+        onClose={() => setShowSave(false)}
+        onSave={handleSave}
+        initialTitle={query.slice(0, 60)}
+        initialCategory={"Genel"}
+      />
     </>
   );
 }
