@@ -3,13 +3,14 @@
 import { ReactNode } from "react";
 
 const tabs: Array<{
-  id: "query" | "tools" | "saved";
+  id: "chat" | "query" | "tools" | "history";
   label: string;
   icon: ReactNode;
 }> = [
+  { id: "chat", label: "Chat", icon: "💬" },
   { id: "query", label: "Query", icon: "🧠" },
   { id: "tools", label: "Tools", icon: "🛠️" },
-  { id: "saved", label: "History", icon: "💾" },
+  { id: "history", label: "History", icon: "💾" },
   // config tab is intentionally hidden for now
 ];
 
@@ -27,8 +28,8 @@ export default function HomeHeader({
   onModelChange: (value: string) => void;
   debugMode: boolean;
   onToggleDebug: () => void;
-  activeTab: "query" | "tools" | "saved";
-  onTabChange: (tab: "query" | "tools" | "saved") => void;
+  activeTab: "chat" | "query" | "tools" | "history";
+  onTabChange: (tab: "chat" | "query" | "tools" | "history") => void;
   companyName?: string | null;
   branchName?: string | null;
 }) {

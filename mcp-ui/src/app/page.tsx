@@ -12,11 +12,16 @@ import {
 } from "../services/api";
 import HomeHeader from "../components/home/HomeHeader";
 import QueryTab from "../components/home/QueryTab";
+import ChatTab from "../components/home/ChatTab";
 import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
 import SavedPrompts from "../components/home/SavedPrompts";
-// import ConfigurationPanel from "../components/home/ConfigurationPanel";
 import LoadingOverlay from "../components/home/LoadingOverlay";
-import type { DebugPayload, PlannerSummary, ToolCallInfo } from "../types/home";
+import type {
+  DebugPayload,
+  PlannerSummary,
+  ToolCallInfo,
+  ChatMessage,
+} from "../types/home";
 
 const MODEL_STORAGE_KEY = "mcp_ui_model";
 
@@ -39,6 +44,7 @@ export default function Home() {
     branch?: { name?: string } | null;
   } | null>(null);
   const [debugData, setDebugData] = useState<DebugPayload | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [model, setModel] = useState<string>(() => {
     try {
       if (typeof window !== "undefined") {
@@ -99,9 +105,9 @@ export default function Home() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"query" | "tools" | "saved">(
-    "query"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "chat" | "query" | "tools" | "history"
+  >("chat");
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -232,26 +238,6 @@ export default function Home() {
     }
   }
 
-  // async function saveConfig(newConfig: {
-  //   system_prompt?: string;
-  //   schema?: string;
-  //   toolset?: {
-  //     enabled?: boolean;
-  //     name?: string;
-  //   };
-  // }) {
-  //   try {
-  //     await apiUpdateConfig(
-  //       newConfig,
-  //       model === "custom" ? "custom" : "deepseek"
-  //     );
-  //     await loadConfig();
-  //     return true;
-  //   } catch (err: unknown) {
-  //     return false;
-  //   }
-  // }
-
   const handleClear = () => {
     setQuery("");
     setCustomSchema("");
@@ -266,6 +252,7 @@ export default function Home() {
     setToolCall(null);
     setPlannerInfo(null);
     setPlannerDebug(null);
+    setMessages([]);
   };
 
   async function handleSubmit(e: React.FormEvent) {
@@ -288,6 +275,14 @@ export default function Home() {
     setToolCall(null);
     setPlannerInfo(null);
     setPlannerDebug(null);
+    const userMessage: ChatMessage = {
+      id: `${Date.now()}-user`,
+      role: "user",
+      content: query,
+      createdAt: Date.now(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setQuery("");
     try {
       const data = await apiGenerate({
         prompt: query,
@@ -340,6 +335,28 @@ export default function Home() {
         } satisfies ToolCallInfo;
       })();
       setToolCall(nextToolCall);
+      const assistantContent =
+        (typeof data.rawModelOutput === "string" && data.rawModelOutput) ||
+        (typeof data.sql === "string" && data.sql) ||
+        "";
+      const assistantMessage: ChatMessage = {
+        id: `${Date.now()}-assistant`,
+        role: "assistant",
+        content: assistantContent,
+        sql: typeof data.sql === "string" ? data.sql : null,
+        modelOutput:
+          typeof data.rawModelOutput === "string" ? data.rawModelOutput : null,
+        executionResult: data.executionResult ?? null,
+        toolCall: nextToolCall,
+        strategy:
+          data && data.strategy === "tool"
+            ? "tool"
+            : data && data.strategy === "sql"
+            ? "sql"
+            : null,
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "Request failed";
@@ -353,6 +370,13 @@ export default function Home() {
       } else {
         setError(errorMessage);
       }
+      const assistantError: ChatMessage = {
+        id: `${Date.now()}-assistant-error`,
+        role: "assistant",
+        content: `Error: ${errorMessage}`,
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, assistantError]);
     } finally {
       setLoading(false);
     }
@@ -361,7 +385,6 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-black to-zinc-900 text-white">
       <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iNCIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
-
       <div className="relative max-w-6xl mx-auto p-6">
         <HomeHeader
           model={model}
@@ -399,6 +422,16 @@ export default function Home() {
           />
         )}
 
+        {activeTab === "chat" && (
+          <ChatTab
+            query={query}
+            onQueryChange={setQuery}
+            onSubmit={handleSubmit}
+            loading={loading}
+            messages={messages}
+          />
+        )}
+
         {activeTab === "tools" && (
           <ToolsPanel
             tools={tools}
@@ -418,11 +451,9 @@ export default function Home() {
           />
         )}
 
-        {activeTab === "saved" && <SavedPrompts />}
-
-        {/* config tab removed */}
+        {activeTab === "history" && <SavedPrompts />}
       </div>
-      {loading && <LoadingOverlay />}
+      {loading && activeTab !== "chat" && <LoadingOverlay />}
     </div>
   );
 }

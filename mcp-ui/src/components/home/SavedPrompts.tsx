@@ -63,11 +63,22 @@ export default function SavedPrompts() {
   const [query, setQuery] = useState("");
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<Record<string, unknown>>({});
+  // Results are shown in a modal immediately; no list-level cache needed for now
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [resultModalOpen, setResultModalOpen] = useState(false);
+  const [resultModalTitle, setResultModalTitle] = useState<string>("");
+  const [resultModalData, setResultModalData] = useState<unknown>(null);
 
   useEffect(() => {
     load();
   }, []);
+
+  // Auto-hide toast for run errors
+  useEffect(() => {
+    if (!runError) return;
+    const t = setTimeout(() => setRunError(null), 3000);
+    return () => clearTimeout(t);
+  }, [runError]);
 
   async function load() {
     setLoading(true);
@@ -94,6 +105,28 @@ export default function SavedPrompts() {
     );
   }, [prompts, query]);
 
+  const grouped = useMemo(() => {
+    const m = new Map<string, SavedPrompt[]>();
+    for (const p of filtered) {
+      const key = p.category || "Genel";
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(p);
+    }
+    // sort items by createdAt desc inside each group
+    for (const [, arr] of m) {
+      arr.sort(
+        (a, b) =>
+          (b.createdAt ? new Date(b.createdAt).getTime() : 0) -
+          (a.createdAt ? new Date(a.createdAt).getTime() : 0)
+      );
+    }
+    return Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [filtered]);
+
+  function toggle(cat: string) {
+    setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  }
+
   async function rerun(p: SavedPrompt) {
     const id = p._id || `${p.title}-${p.createdAt}` || p.title;
     setRunningId(id);
@@ -111,7 +144,9 @@ export default function SavedPrompts() {
         const exec = await callTool("mysql_execute", { sql: p.sql });
         result = exec?.result ?? null;
       }
-      setRunResult((prev) => ({ ...prev, [id]: result }));
+      setResultModalTitle(p.title);
+      setResultModalData(result);
+      setResultModalOpen(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Çalıştırılamadı";
       setRunError(message);
@@ -121,7 +156,7 @@ export default function SavedPrompts() {
   }
 
   return (
-    <div className="mt-6">
+    <div className="mt-6 relative">
       <div className="mb-4 flex items-center gap-3">
         <input
           className="flex-1 rounded-xl bg-zinc-900/60 border border-zinc-800/60 p-3 text-sm text-zinc-200"
@@ -148,70 +183,160 @@ export default function SavedPrompts() {
       ) : filtered.length === 0 ? (
         <div className="text-sm text-zinc-400">Kayıt bulunamadı</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filtered.map((p) => (
-            <div
-              key={p._id || `${p.title}-${p.createdAt}`}
-              className="rounded-2xl border border-zinc-800/60 bg-zinc-900/50 p-4"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-100">
-                    {p.title}
+        <div className="space-y-3">
+          {grouped.map(([category, items]) => {
+            const isOpen = !!expanded[category];
+            return (
+              <div
+                key={category}
+                className="rounded-2xl border border-zinc-800/60 bg-zinc-900/40"
+              >
+                <button
+                  className="w-full flex items-center justify-between px-4 py-3 text-sm text-zinc-200 hover:bg-zinc-900/60 rounded-2xl"
+                  onClick={() => toggle(category)}
+                >
+                  <span className="font-medium">{category}</span>
+                  <span className="text-xs text-zinc-400">{items.length}</span>
+                </button>
+                {isOpen && (
+                  <div className="px-3 pb-3 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2">
+                    {items.map((p) => {
+                      const id =
+                        p._id || `${p.title}-${p.createdAt}` || p.title;
+                      // modal üzerinden gösterdiğimiz için kart içinde sonucu rendere etmiyoruz
+                      return (
+                        <div
+                          key={id}
+                          className="rounded-md border border-zinc-800/60 bg-zinc-900/60 p-2 hover:bg-zinc-900/70 transition-colors"
+                          title={p.sql ? p.sql.slice(0, 200) : undefined}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <div
+                              className="text-xs text-zinc-100 truncate"
+                              title={p.title}
+                            >
+                              {p.title}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {p.createdAt && (
+                                <div className="text-[10px] text-zinc-500">
+                                  {new Date(p.createdAt).toLocaleDateString()}
+                                </div>
+                              )}
+                              <button
+                                className="text-[10px] px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-200 border border-emerald-600/40 hover:bg-emerald-600/30 disabled:opacity-60"
+                                onClick={() => rerun(p)}
+                                disabled={runningId !== null}
+                              >
+                                {runningId === id ? "Çalışıyor..." : "Çalıştır"}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-1 text-[11px] text-zinc-400 line-clamp-1">
+                            {p.prompt}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="text-xs text-zinc-400">{p.category}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {p.createdAt && (
-                    <div className="text-[10px] text-zinc-500">
-                      {new Date(p.createdAt).toLocaleString()}
-                    </div>
-                  )}
-                  <button
-                    className="text-xs px-3 py-1 rounded-lg bg-emerald-600/20 text-emerald-200 border border-emerald-600/40 hover:bg-emerald-600/30 disabled:opacity-60"
-                    onClick={() => rerun(p)}
-                    disabled={runningId !== null}
-                  >
-                    {runningId ===
-                    (p._id || `${p.title}-${p.createdAt}` || p.title)
-                      ? "Çalışıyor..."
-                      : "Tekrar Çalıştır"}
-                  </button>
-                </div>
+                )}
               </div>
-              <div className="text-xs text-zinc-300 whitespace-pre-wrap break-words">
-                {p.prompt}
+            );
+          })}
+        </div>
+      )}
+
+      {/* Result Modal */}
+      {resultModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setResultModalOpen(false)}
+          ></div>
+          <div className="relative max-w-5xl w-[96vw] max-h-[80vh] overflow-auto rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-2xl">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <div className="text-sm font-semibold text-zinc-200 truncate pr-4">
+                {resultModalTitle}
               </div>
-              {(p.sql || p.modelOutput) && (
-                <details className="mt-2">
-                  <summary className="text-xs text-blue-300 cursor-pointer">
-                    Detaylar
-                  </summary>
-                  {p.sql && (
-                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words bg-blue-900/20 border border-blue-700/40 rounded p-2 text-blue-100">
-                      {p.sql}
-                    </pre>
-                  )}
-                  {p.modelOutput && (
-                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words bg-purple-900/20 border border-purple-700/40 rounded p-2 text-purple-100">
-                      {p.modelOutput}
-                    </pre>
-                  )}
-                </details>
-              )}
-              {runError && (
-                <div className="mt-2 text-xs text-red-400">
-                  Hata: {runError}
-                </div>
-              )}
-              {(() => {
-                const id = p._id || `${p.title}-${p.createdAt}` || p.title;
-                const result = runResult[id];
-                if (result === undefined) return null;
-                return <ResultViewer result={result} />;
-              })()}
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-xs px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                  onClick={() => {
+                    try {
+                      const json = JSON.stringify(
+                        resultModalData ?? {},
+                        null,
+                        2
+                      );
+                      navigator.clipboard?.writeText(json);
+                    } catch {}
+                  }}
+                >
+                  Copy JSON
+                </button>
+                <button
+                  className="text-xs px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700"
+                  onClick={() => {
+                    try {
+                      const rows = extractRows(resultModalData);
+                      const csv = (() => {
+                        if (!rows || rows.length === 0) return "";
+                        const headers = Array.from(
+                          new Set(rows.flatMap((o) => Object.keys(o)))
+                        );
+                        const escape = (v: unknown) => {
+                          const s = v == null ? "" : String(v);
+                          return /[",\n]/.test(s)
+                            ? `"${s.replace(/"/g, '""')}"`
+                            : s;
+                        };
+                        const lines = [headers.join(",")];
+                        for (const r of rows) {
+                          lines.push(
+                            headers
+                              .map((h) =>
+                                escape((r as Record<string, unknown>)[h])
+                              )
+                              .join(",")
+                          );
+                        }
+                        return lines.join("\n");
+                      })();
+                      const blob = new Blob([csv], {
+                        type: "text/csv;charset=utf-8;",
+                      });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "result.csv";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    } catch {}
+                  }}
+                >
+                  Download CSV
+                </button>
+                <button
+                  className="text-xs px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                  onClick={() => setResultModalOpen(false)}
+                >
+                  Kapat
+                </button>
+              </div>
             </div>
-          ))}
+            <ResultViewer result={resultModalData} />
+          </div>
+        </div>
+      )}
+
+      {/* Toast for run errors */}
+      {runError && (
+        <div className="fixed right-6 bottom-6 z-50">
+          <div className="px-4 py-3 rounded-lg border border-red-600/40 bg-red-900/80 text-red-100 text-sm shadow-lg">
+            {runError}
+          </div>
         </div>
       )}
     </div>

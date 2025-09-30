@@ -5,23 +5,8 @@ export function DataTable({ rows }: { rows: Row[] }) {
   if (!rows || rows.length === 0) return null;
   const cols = Array.from(new Set(rows.flatMap((o) => Object.keys(o))));
   const limited = rows.slice(0, 50);
-  const handleCopy = async () => {
-    try {
-      const json = JSON.stringify(rows, null, 2);
-      await navigator.clipboard.writeText(json);
-    } catch (err) {
-      console.error("Copy failed", err);
-    }
-  };
   return (
     <div className="overflow-x-auto border border-zinc-800 rounded-lg mt-2 shadow-sm relative">
-      <button
-        onClick={handleCopy}
-        className="absolute right-2 top-2 text-xs px-3 py-1 rounded-md bg-zinc-800/70 hover:bg-zinc-700/70 border border-zinc-700/70"
-        title="Copy JSON"
-      >
-        Copy JSON
-      </button>
       <table className="min-w-full text-left text-sm">
         <thead className="bg-zinc-900 text-gray-300">
           <tr>

@@ -48,3 +48,17 @@ export type AppConfig = {
     } | null;
   };
 };
+
+export type ChatMessageRole = "user" | "assistant" | "tool";
+
+export type ChatMessage = {
+  id: string;
+  role: ChatMessageRole;
+  content: string;
+  sql?: string | null;
+  modelOutput?: string | null;
+  executionResult?: unknown;
+  toolCall?: ToolCallInfo | null;
+  strategy?: "tool" | "sql" | null;
+  createdAt?: number;
+};

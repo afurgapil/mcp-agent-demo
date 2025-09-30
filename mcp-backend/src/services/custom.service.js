@@ -7,7 +7,7 @@ function buildUserMessage(userPrompt) {
 function getTimeoutMs() {
   const fromEnv = Number(process.env.CUSTOM_API_TIMEOUT_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
-  return 10000; // 10s default
+  return 10000;
 }
 
 function createTimeoutSignal(timeoutMs) {
@@ -42,7 +42,6 @@ async function fetchJsonWithTimeout(url, options = {}) {
     }
     return { res, data };
   } catch (err) {
-    // Surface low-level network error details
     const cause = err?.cause || err;
     const code = cause?.code || cause?.name || "UNKNOWN";
     const msg = cause?.message || String(err);
@@ -105,7 +104,6 @@ export async function callCustomChat({
       body: JSON.stringify(body),
     }));
   } catch (err) {
-    // Add endpoint context to error
     throw new Error(`Network error calling ${endpoint}: ${err.message}`, {
       cause: err,
     });
@@ -149,17 +147,9 @@ export async function callCustomForSql({
     system_prompt: systemPrompt,
   };
 
-  const res = await fetch(new URL("/api/generate", base).toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  // The above existing fetch will be replaced with the timeout-enabled helper
-  // to keep indentation context stable in this patch section.
-  // Re-run request with timeout/error enrichment:
-  let timedRes, data;
+  let upstream, data;
   try {
-    ({ res: timedRes, data } = await fetchJsonWithTimeout(
+    ({ res: upstream, data } = await fetchJsonWithTimeout(
       new URL("/api/generate", base).toString(),
       {
         method: "POST",
@@ -175,13 +165,13 @@ export async function callCustomForSql({
       { cause: err }
     );
   }
-  if (!timedRes.ok) {
+  if (!upstream.ok) {
     const msg =
       data?.detail?.[0]?.msg ||
       data?.message ||
-      timedRes.statusText ||
+      upstream.statusText ||
       "Unknown upstream error";
-    throw new Error(`Custom API error ${timedRes.status}: ${msg}`);
+    throw new Error(`Custom API error ${upstream.status}: ${msg}`);
   }
 
   const content =
