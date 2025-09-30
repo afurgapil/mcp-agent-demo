@@ -206,6 +206,92 @@ export type SavedPrompt = {
   createdAt?: string;
 };
 
+// Chat sessions API
+export type ChatSessionSummary = {
+  sessionId: string;
+  title: string;
+  createdAt?: string;
+};
+
+export type ChatSession = {
+  sessionId: string;
+  title: string;
+  createdAt?: string;
+  messages: Array<{
+    id: string;
+    role: "user" | "assistant" | "tool";
+    content: string;
+    sql?: string | null;
+    modelOutput?: string | null;
+    executionResult?: unknown;
+    toolCall?: Record<string, unknown> | null;
+    strategy?: "tool" | "sql" | null;
+    createdAt?: number;
+  }>;
+};
+
+export async function createSession(
+  title?: string
+): Promise<ChatSessionSummary> {
+  const res = await fetch(`${API_BASE}/sessions`, {
+    method: "POST",
+    headers: withAuth({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to create session");
+  const data = await res.json();
+  return data.session as ChatSessionSummary;
+}
+
+export async function listSessions(): Promise<ChatSessionSummary[]> {
+  const res = await fetch(`${API_BASE}/sessions`, { headers: withAuth() });
+  if (!res.ok) throw new Error("Failed to fetch sessions");
+  const data = await res.json();
+  return (data.sessions || []) as ChatSessionSummary[];
+}
+
+export async function getSession(sessionId: string): Promise<ChatSession> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    headers: withAuth(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch session");
+  const data = await res.json();
+  return data.session as ChatSession;
+}
+
+export async function appendSessionMessages(
+  sessionId: string,
+  messages: ChatSession["messages"]
+): Promise<ChatSession> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: withAuth({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ messages }),
+  });
+  if (!res.ok) throw new Error("Failed to append messages");
+  const data = await res.json();
+  return data.session as ChatSession;
+}
+
+export async function renameSession(sessionId: string, title: string) {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    method: "PATCH",
+    headers: withAuth({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error("Failed to rename session");
+  return res.json();
+}
+
+export async function deleteSession(sessionId: string) {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    method: "DELETE",
+    headers: withAuth(),
+  });
+  if (!res.ok) throw new Error("Failed to delete session");
+  return res.json();
+}
+
 export async function fetchPrompts(): Promise<{ prompts: SavedPrompt[] }> {
   const res = await fetch(`${API_BASE}/prompts`, {
     headers: withAuth(),

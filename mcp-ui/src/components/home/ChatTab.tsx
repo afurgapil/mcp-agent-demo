@@ -44,58 +44,13 @@ export default function ChatTab({
   } | null>(null);
   return (
     <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-xs text-zinc-400">Chat</div>
-        <div className="flex items-center gap-2 text-[11px]">
-          <span>Font</span>
-          <select
-            className="px-2 py-1 rounded bg-zinc-800/70 border border-zinc-700/60 text-zinc-200"
-            defaultValue="14px"
-            onChange={(e) => {
-              const size = e.target.value;
-              document.documentElement.style.setProperty(
-                "--chat-font-size",
-                size
-              );
-            }}
-          >
-            <option value="12px">S</option>
-            <option value="14px">M</option>
-            <option value="16px">L</option>
-          </select>
-          <span>Density</span>
-          <select
-            className="px-2 py-1 rounded bg-zinc-800/70 border border-zinc-700/60 text-zinc-200"
-            defaultValue="cozy"
-            onChange={(e) => {
-              const d = e.target.value;
-              const container = document.querySelector(
-                '[data-testid="chat-thread"]'
-              );
-              if (!container) return;
-              container.classList.remove(
-                "chat-density-compact",
-                "chat-density-cozy",
-                "chat-density-comfortable"
-              );
-              container.classList.add(`chat-density-${d}`);
-            }}
-          >
-            <option value="compact">Compact</option>
-            <option value="cozy">Cozy</option>
-            <option value="comfortable">Comfortable</option>
-          </select>
-        </div>
-      </div>
-      <style>{`:root{--chat-font-size:14px;--chat-gap:0.75rem} .chat-density-compact{--chat-gap:0.5rem} .chat-density-cozy{--chat-gap:0.75rem} .chat-density-comfortable{--chat-gap:1rem}`}</style>
+      <div className="mb-2 text-xs text-zinc-400">Chat</div>
+      <style>{`.chat-thread::-webkit-scrollbar{width:8px} .chat-thread::-webkit-scrollbar-track{background:transparent} .chat-thread::-webkit-scrollbar-thumb{background:rgba(100,116,139,0.4);border-radius:9999px} .chat-thread::-webkit-scrollbar-thumb:hover{background:rgba(100,116,139,0.6)}`}</style>
       <div
-        className="mb-6 h-[55vh] overflow-y-auto pr-1 chat-density-cozy"
+        className="mb-6 h-[55vh] overflow-y-auto pr-1 chat-thread"
         data-testid="chat-thread"
       >
-        <div
-          className="space-y-[var(--chat-gap)]"
-          style={{ fontSize: "var(--chat-font-size)" }}
-        >
+        <div className="space-y-3">
           {messages.map((m) => {
             const isUser = m.role === "user";
             if (isUser) {
@@ -103,10 +58,7 @@ export default function ChatTab({
                 <div key={m.id} className="flex justify-end gap-2">
                   <div className="inline-flex items-start max-w-[70%] rounded-2xl px-4 py-2 bg-blue-600/25 border border-blue-500/40 text-blue-100 shadow-sm">
                     <div className="text-right">
-                      <div
-                        className="whitespace-pre-wrap break-words"
-                        style={{ fontSize: "var(--chat-font-size)" }}
-                      >
+                      <div className="whitespace-pre-wrap break-words">
                         {m.content}
                       </div>
                       {m.createdAt ? (
@@ -140,10 +92,7 @@ export default function ChatTab({
                         : "bg-zinc-800/70 border-zinc-700/60 text-zinc-100"
                     }`}
                   >
-                    <div
-                      className="whitespace-pre-wrap break-words pr-16"
-                      style={{ fontSize: "var(--chat-font-size)" }}
-                    >
+                    <div className="whitespace-pre-wrap break-words pr-16">
                       {m.content}
                     </div>
                     <div className="absolute top-1.5 right-1.5 flex items-center gap-1">

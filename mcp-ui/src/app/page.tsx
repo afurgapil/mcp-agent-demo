@@ -1,7 +1,17 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import { getToken, getMe } from "../services/api";
+import {
+  getToken,
+  getMe,
+  listSessions,
+  createSession,
+  appendSessionMessages,
+  getSession,
+  type ChatSessionSummary,
+  renameSession,
+  deleteSession,
+} from "../services/api";
 import { useRouter } from "next/navigation";
 import {
   getDebugStatus,
@@ -23,6 +33,7 @@ import type {
   ToolCallInfo,
   ChatMessage,
 } from "../types/home";
+import ConfirmModal from "../components/home/ConfirmModal";
 
 const MODEL_STORAGE_KEY = "mcp_ui_model";
 
@@ -46,6 +57,8 @@ export default function Home() {
   } | null>(null);
   const [debugData, setDebugData] = useState<DebugPayload | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [model, setModel] = useState<string>(() => {
     try {
       if (typeof window !== "undefined") {
@@ -84,6 +97,13 @@ export default function Home() {
           : null;
       if (savedModel) setModel(savedModel);
     } catch {}
+    // load sessions from backend
+    listSessions()
+      .then((xs) => {
+        setSessions(xs);
+        if (xs.length > 0) setCurrentSessionId(xs[0].sessionId);
+      })
+      .catch(() => setSessions([]));
   }, [router]);
 
   useEffect(() => {
@@ -96,6 +116,14 @@ export default function Home() {
       }
     } catch {}
   }, [model]);
+
+  // load messages of selected session
+  useEffect(() => {
+    if (!currentSessionId) return;
+    getSession(currentSessionId)
+      .then((s) => setMessages(s.messages as unknown as ChatMessage[]))
+      .catch(() => setMessages([]));
+  }, [currentSessionId]);
 
   const toggleDebugMode = async () => {
     try {
@@ -126,6 +154,8 @@ export default function Home() {
   const [plannerInfo, setPlannerInfo] = useState<PlannerSummary | null>(null);
   const [plannerDebug, setPlannerDebug] = useState<unknown>(null);
   // const [syncingEmbedding, setSyncingEmbedding] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
 
   const categorizeTools = (toolsList: ToolDefinition[]) => {
     const categories: Record<string, ToolDefinition[]> = {};
@@ -276,6 +306,18 @@ export default function Home() {
     setToolCall(null);
     setPlannerInfo(null);
     setPlannerDebug(null);
+
+    // Ensure a session exists or create one
+    let sid = currentSessionId;
+    if (!sid) {
+      try {
+        const s = await createSession(query.slice(0, 60) || "Yeni sohbet");
+        setSessions((prev) => [s, ...prev]);
+        setCurrentSessionId(s.sessionId);
+        sid = s.sessionId;
+      } catch {}
+    }
+
     const userMessage: ChatMessage = {
       id: `${Date.now()}-user`,
       role: "user",
@@ -358,6 +400,11 @@ export default function Home() {
         createdAt: Date.now(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
+      if (sid) {
+        appendSessionMessages(sid, [userMessage, assistantMessage]).catch(
+          () => {}
+        );
+      }
     } catch (err: unknown) {
       const errorMessage =
         err instanceof Error ? err.message : "Request failed";
@@ -378,15 +425,26 @@ export default function Home() {
         createdAt: Date.now(),
       };
       setMessages((prev) => [...prev, assistantError]);
+      if (sid) {
+        appendSessionMessages(sid, [userMessage, assistantError]).catch(
+          () => {}
+        );
+      }
     } finally {
       setLoading(false);
     }
   }
 
+  const [renameTarget, setRenameTarget] = useState<{
+    id: string;
+    oldTitle: string;
+  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-black to-zinc-900 text-white">
       <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iNCIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
-      <div className="relative max-w-7xl mx-auto p-4">
+      <div className="relative max-w-7xl mx-auto px-4 md:px-6 lg:px-8 py-4">
         <HomeHeader
           model={model}
           onModelChange={setModel}
@@ -398,11 +456,25 @@ export default function Home() {
           branchName={me?.branch?.name || null}
         />
 
-        <div className="grid grid-cols-12 gap-4">
-          <aside className="hidden md:block md:col-span-3 lg:col-span-2">
-            <SidebarTabs active={activeTab} onChange={setActiveTab} />
-          </aside>
-          <main className="col-span-12 md:col-span-9 lg:col-span-10">
+        <div className="relative flex gap-x-6">
+          {!leftCollapsed && (
+            <aside className="hidden md:block w-60 lg:w-56 shrink-0">
+              <div className="sticky top-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-zinc-400">Menü</div>
+                  <button
+                    className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                    onClick={() => setLeftCollapsed(true)}
+                    title="Gizle"
+                  >
+                    ⟨
+                  </button>
+                </div>
+                <SidebarTabs active={activeTab} onChange={setActiveTab} />
+              </div>
+            </aside>
+          )}
+          <main className="flex-1 min-w-0">
             {activeTab === "query" && (
               <QueryTab
                 query={query}
@@ -429,13 +501,129 @@ export default function Home() {
             )}
 
             {activeTab === "chat" && (
-              <ChatTab
-                query={query}
-                onQueryChange={setQuery}
-                onSubmit={handleSubmit}
-                loading={loading}
-                messages={messages}
-              />
+              <div className="relative flex gap-x-6">
+                <div className={`flex-1 min-w-0`}>
+                  <ChatTab
+                    query={query}
+                    onQueryChange={setQuery}
+                    onSubmit={handleSubmit}
+                    loading={loading}
+                    messages={messages}
+                  />
+                </div>
+                {!rightCollapsed && (
+                  <aside className="hidden lg:block w-56 shrink-0">
+                    <div className="sticky top-4 rounded-2xl border border-zinc-800/60 bg-zinc-900/40 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xs text-zinc-400">Sohbetler</div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                            onClick={async () => {
+                              try {
+                                const s = await createSession("Yeni sohbet");
+                                setSessions((prev) => [s, ...prev]);
+                                setCurrentSessionId(s.sessionId);
+                                setMessages([]);
+                              } catch {}
+                            }}
+                          >
+                            Yeni
+                          </button>
+                          <button
+                            className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                            onClick={() => setRightCollapsed(true)}
+                            title="Paneli gizle"
+                          >
+                            ➜
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 max-h-[60vh] overflow-auto pr-1">
+                        {sessions.map((s) => (
+                          <div
+                            key={s.sessionId}
+                            className={`px-3 py-2 rounded-lg text-xs border transition flex items-start justify-between gap-2 ${
+                              currentSessionId === s.sessionId
+                                ? "bg-blue-500/10 text-blue-200 border-blue-500/30"
+                                : "bg-zinc-900/50 text-zinc-300 border-zinc-800 hover:bg-zinc-900/70"
+                            }`}
+                          >
+                            <button
+                              className="flex-1 text-left"
+                              onClick={async () => {
+                                setCurrentSessionId(s.sessionId);
+                                try {
+                                  const full = await getSession(s.sessionId);
+                                  setMessages(
+                                    full.messages as unknown as ChatMessage[]
+                                  );
+                                } catch {
+                                  setMessages([]);
+                                }
+                              }}
+                              title={s.title}
+                            >
+                              <div className="truncate">
+                                {s.title || "(untitled)"}
+                              </div>
+                              <div className="text-[10px] text-zinc-500">
+                                {s.createdAt
+                                  ? new Date(s.createdAt).toLocaleString()
+                                  : ""}
+                              </div>
+                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                                title="Rename"
+                                onClick={() =>
+                                  setRenameTarget({
+                                    id: s.sessionId,
+                                    oldTitle: s.title,
+                                  })
+                                }
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                                title="Delete"
+                                onClick={() => setDeleteTarget(s.sessionId)}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {sessions.length === 0 && (
+                          <div className="text-[11px] text-zinc-500">
+                            Henüz sohbet yok
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </aside>
+                )}
+                {leftCollapsed && (
+                  <button
+                    className="hidden md:block absolute left-2 top-0 mt-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                    onClick={() => setLeftCollapsed(false)}
+                    title="Menüyü göster"
+                  >
+                    ⟩
+                  </button>
+                )}
+                {rightCollapsed && (
+                  <button
+                    className="hidden lg:block absolute right-2 top-0 mt-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                    onClick={() => setRightCollapsed(false)}
+                    title="Sohbetleri göster"
+                  >
+                    ◀
+                  </button>
+                )}
+              </div>
             )}
 
             {activeTab === "tools" && (
@@ -462,6 +650,54 @@ export default function Home() {
         </div>
       </div>
       {loading && activeTab !== "chat" && <LoadingOverlay />}
+      <ConfirmModal
+        open={!!renameTarget}
+        title="Sohbeti Yeniden Adlandır"
+        description="Yeni bir başlık girin."
+        inputPlaceholder="Başlık"
+        defaultValue={renameTarget?.oldTitle || ""}
+        confirmText="Kaydet"
+        cancelText="İptal"
+        onConfirm={async (val) => {
+          if (!renameTarget) return;
+          try {
+            if (val && val.trim()) {
+              await renameSession(renameTarget.id, val.trim());
+              setSessions((prev) =>
+                prev.map((x) =>
+                  x.sessionId === renameTarget.id
+                    ? { ...x, title: val.trim() }
+                    : x
+                )
+              );
+            }
+          } catch {}
+          setRenameTarget(null);
+        }}
+        onClose={() => setRenameTarget(null)}
+      />
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Sohbeti Sil"
+        description="Bu işlemi geri alamazsınız."
+        confirmText="Sil"
+        cancelText="Vazgeç"
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            await deleteSession(deleteTarget);
+            setSessions((prev) =>
+              prev.filter((x) => x.sessionId !== deleteTarget)
+            );
+            if (currentSessionId === deleteTarget) {
+              setCurrentSessionId(null);
+              setMessages([]);
+            }
+          } catch {}
+          setDeleteTarget(null);
+        }}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
