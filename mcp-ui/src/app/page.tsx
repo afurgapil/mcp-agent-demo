@@ -11,6 +11,7 @@ import {
   generate as apiGenerate,
 } from "../services/api";
 import HomeHeader from "../components/home/HomeHeader";
+import SidebarTabs from "../components/home/SidebarTabs";
 import QueryTab from "../components/home/QueryTab";
 import ChatTab from "../components/home/ChatTab";
 import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
@@ -385,7 +386,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-black to-zinc-900 text-white">
       <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiNmZmZmZmYiIGZpbGwtb3BhY2l0eT0iMC4wMyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iNCIvPjwvZz48L2c+PC9zdmc+')] opacity-40"></div>
-      <div className="relative max-w-6xl mx-auto p-6">
+      <div className="relative max-w-7xl mx-auto p-4">
         <HomeHeader
           model={model}
           onModelChange={setModel}
@@ -397,61 +398,68 @@ export default function Home() {
           branchName={me?.branch?.name || null}
         />
 
-        {activeTab === "query" && (
-          <QueryTab
-            query={query}
-            onQueryChange={setQuery}
-            onSubmit={handleSubmit}
-            loading={loading}
-            error={error}
-            generatedSql={generatedSql}
-            modelOutput={modelOutput}
-            executionResult={executionResult}
-            raw={raw}
-            useToolset={useToolset}
-            onToggleToolset={setUseToolset}
-            strategy={strategy}
-            toolCall={toolCall}
-            plannerInfo={plannerInfo}
-            plannerDebug={plannerDebug}
-            schemaSource={schemaSource}
-            debugMode={debugMode}
-            debugData={debugData}
-            onClearDebug={() => setDebugData(null)}
-            onClear={handleClear}
-          />
-        )}
+        <div className="grid grid-cols-12 gap-4">
+          <aside className="hidden md:block md:col-span-3 lg:col-span-2">
+            <SidebarTabs active={activeTab} onChange={setActiveTab} />
+          </aside>
+          <main className="col-span-12 md:col-span-9 lg:col-span-10">
+            {activeTab === "query" && (
+              <QueryTab
+                query={query}
+                onQueryChange={setQuery}
+                onSubmit={handleSubmit}
+                loading={loading}
+                error={error}
+                generatedSql={generatedSql}
+                modelOutput={modelOutput}
+                executionResult={executionResult}
+                raw={raw}
+                useToolset={useToolset}
+                onToggleToolset={setUseToolset}
+                strategy={strategy}
+                toolCall={toolCall}
+                plannerInfo={plannerInfo}
+                plannerDebug={plannerDebug}
+                schemaSource={schemaSource}
+                debugMode={debugMode}
+                debugData={debugData}
+                onClearDebug={() => setDebugData(null)}
+                onClear={handleClear}
+              />
+            )}
 
-        {activeTab === "chat" && (
-          <ChatTab
-            query={query}
-            onQueryChange={setQuery}
-            onSubmit={handleSubmit}
-            loading={loading}
-            messages={messages}
-          />
-        )}
+            {activeTab === "chat" && (
+              <ChatTab
+                query={query}
+                onQueryChange={setQuery}
+                onSubmit={handleSubmit}
+                loading={loading}
+                messages={messages}
+              />
+            )}
 
-        {activeTab === "tools" && (
-          <ToolsPanel
-            tools={tools}
-            loading={toolsLoading}
-            error={toolsError}
-            selectedTool={selectedTool}
-            onSelectTool={setSelectedTool}
-            toolParams={toolParams}
-            onUpdateParams={setToolParams}
-            executing={toolExecuting}
-            result={toolResult}
-            onExecute={executeTool}
-            onRefresh={loadTools}
-            categorizeTools={categorizeTools}
-            expandedCategories={expandedCategories}
-            onToggleCategory={toggleCategory}
-          />
-        )}
+            {activeTab === "tools" && (
+              <ToolsPanel
+                tools={tools}
+                loading={toolsLoading}
+                error={toolsError}
+                selectedTool={selectedTool}
+                onSelectTool={setSelectedTool}
+                toolParams={toolParams}
+                onUpdateParams={setToolParams}
+                executing={toolExecuting}
+                result={toolResult}
+                onExecute={executeTool}
+                onRefresh={loadTools}
+                categorizeTools={categorizeTools}
+                expandedCategories={expandedCategories}
+                onToggleCategory={toggleCategory}
+              />
+            )}
 
-        {activeTab === "history" && <SavedPrompts />}
+            {activeTab === "history" && <SavedPrompts />}
+          </main>
+        </div>
       </div>
       {loading && activeTab !== "chat" && <LoadingOverlay />}
     </div>

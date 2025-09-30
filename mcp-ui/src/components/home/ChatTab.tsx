@@ -147,7 +147,7 @@ export default function ChatTab({
                       {m.content}
                     </div>
                     <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
-                      {(m.sql || m.modelOutput) && (
+                      {!isError && (m.sql || m.modelOutput) && (
                         <button
                           type="button"
                           aria-label="Save"
@@ -169,18 +169,20 @@ export default function ChatTab({
                           💾
                         </button>
                       )}
-                      <button
-                        type="button"
-                        aria-label="Copy message"
-                        className="p-1 rounded bg-zinc-700/60 hover:bg-zinc-600/60 text-zinc-200"
-                        onClick={() =>
-                          navigator.clipboard?.writeText(
-                            String(m.content || "")
-                          )
-                        }
-                      >
-                        <CopyIcon />
-                      </button>
+                      {!isError && (
+                        <button
+                          type="button"
+                          aria-label="Copy message"
+                          className="p-1 rounded bg-zinc-700/60 hover:bg-zinc-600/60 text-zinc-200"
+                          onClick={() =>
+                            navigator.clipboard?.writeText(
+                              String(m.content || "")
+                            )
+                          }
+                        >
+                          <CopyIcon />
+                        </button>
+                      )}
                     </div>
                   </div>
                   {showSql && (

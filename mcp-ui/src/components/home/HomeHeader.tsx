@@ -93,22 +93,7 @@ export default function HomeHeader({
         </div>
       </div>
 
-      <div className="bg-zinc-900/60 rounded-2xl border border-zinc-800/60 p-2 flex gap-2">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            className={`flex-1 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
-              activeTab === tab.id
-                ? "bg-gradient-to-r from-blue-500/20 to-purple-500/20 text-blue-200 border border-blue-500/30 shadow-lg"
-                : "bg-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-            }`}
-          >
-            <span>{tab.icon}</span>
-            <span>{tab.label}</span>
-          </button>
-        ))}
-      </div>
+      {/* Tab buttons moved to left sidebar */}
     </header>
   );
 }
