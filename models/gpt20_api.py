@@ -31,6 +31,8 @@ logger.info("✅ GGUF model yüklendi.")
 # 📥 İstek modeli
 class GenerateRequest(BaseModel):
     message: str = Field(..., example="Son 30 gün içinde alışveriş yapan müşteriler kimler?")
+    system_prompt: Optional[str] = Field(None, description="İstek bazlı sistem prompt")
+    schema: Optional[str] = Field(None, description="İstek bazlı DB şeması (JSON veya metin)")
 
 # 📤 Yanıt modeli
 class ChatResponse(BaseModel):
@@ -50,16 +52,20 @@ class ConfigResponse(BaseModel):
 @app.post("/api/generate", response_model=ChatResponse, tags=["Chat"])
 def generate_sql(req: GenerateRequest):
     logger.info("📨 Yeni SQL isteği: %s", req.message)
-    logger.info("📨 Yeni SQL isteği: %s", DB_SCHEMA)
-    logger.info("📨 Yeni SQL isteği: %s", SYSTEM_PROMPT)
+    active_schema = req.schema if (req.schema and req.schema.strip()) else DB_SCHEMA
+    active_system_prompt = (
+        req.system_prompt if (req.system_prompt and req.system_prompt.strip()) else SYSTEM_PROMPT
+    )
+    logger.info("📨 Aktif şema uzunluğu: %d", len(active_schema or ""))
+    logger.info("📨 Aktif system prompt uzunluğu: %d", len(active_system_prompt or ""))
     prompt = f"""<|system|>
-{SYSTEM_PROMPT}
+{active_system_prompt}
 
 <|user|>
 Soru:
 {req.message}
 
-{DB_SCHEMA}
+{active_schema}
 <|assistant|>"""
 
     start = time.perf_counter()
@@ -80,19 +86,3 @@ Soru:
     logger.info("✅ Yanıt süresi: %.2f ms", (end - start) * 1000)
     return {"response": result}
 
-# 🔍 Config göster
-@app.get("/api/config", response_model=ConfigResponse, tags=["Config"])
-def get_config():
-    return {"system_prompt": SYSTEM_PROMPT, "schema": DB_SCHEMA}
-
-# ✏️ Config güncelle
-@app.put("/api/config", tags=["Config"])
-def update_config(req: UpdateConfigRequest):
-    global SYSTEM_PROMPT, DB_SCHEMA
-    if req.system_prompt:
-        SYSTEM_PROMPT = req.system_prompt
-        logger.info("📝 SYSTEM_PROMPT güncellendi.")
-    if req.schema:
-        DB_SCHEMA = req.schema
-        logger.info("📝 DB_SCHEMA güncellendi.")
-    return {"message": "Config güncellendi."}

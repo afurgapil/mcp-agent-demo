@@ -23,10 +23,22 @@ async function postJson(path, body) {
   return res.json();
 }
 
-export async function rankToolsWithEmbedding({ prompt, limit = 8 }) {
+export async function rankToolsWithEmbedding({
+  prompt,
+  limit = 8,
+  schema = null,
+  systemPrompt = null,
+}) {
   if (!EMBED_BASE) return null;
   try {
     const payload = { prompt, limit };
+    if (schema) {
+      payload.schema =
+        typeof schema === "string" ? schema : JSON.stringify(schema);
+    }
+    if (systemPrompt) {
+      payload.system_prompt = systemPrompt;
+    }
     const response = await postJson("/rank/tools", payload);
     return response;
   } catch (err) {
@@ -35,10 +47,22 @@ export async function rankToolsWithEmbedding({ prompt, limit = 8 }) {
   }
 }
 
-export async function rankTablesWithEmbedding({ prompt, limit = 3 }) {
+export async function rankTablesWithEmbedding({
+  prompt,
+  limit = 3,
+  schema = null,
+  systemPrompt = null,
+}) {
   if (!EMBED_BASE) return null;
   try {
     const payload = { prompt, limit };
+    if (schema) {
+      payload.schema =
+        typeof schema === "string" ? schema : JSON.stringify(schema);
+    }
+    if (systemPrompt) {
+      payload.system_prompt = systemPrompt;
+    }
     const response = await postJson("/rank/tables", payload);
     return response;
   } catch (err) {

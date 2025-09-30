@@ -111,59 +111,10 @@ export async function toggleDebug() {
   return res.json();
 }
 
-export async function fetchConfig(
-  provider?: "deepseek" | "custom"
-): Promise<ConfigResponse> {
-  const url =
-    provider === "custom"
-      ? `${API_BASE}/api/config?provider=custom`
-      : `${API_BASE}/api/config`;
-  const res = await fetch(url, {
-    headers: withAuth(provider === "custom" ? { "x-provider": "custom" } : {}),
-  });
-  if (!res.ok) throw new Error("Configuration service unavailable");
-  return res.json();
-}
-
-export async function updateConfig(
-  body: Partial<ConfigResponse>,
-  provider?: "deepseek" | "custom"
-) {
-  const url =
-    provider === "custom"
-      ? `${API_BASE}/api/config?provider=custom`
-      : `${API_BASE}/api/config`;
-  const headers: Record<string, string> = withAuth({
-    "Content-Type": "application/json",
-  });
-  if (provider === "custom") headers["x-provider"] = "custom";
-  const res = await fetch(url, {
-    method: "PUT",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await res.json();
-  return res.json();
-}
-
 export async function fetchTools() {
   const res = await fetch(`${API_BASE}/tools`, { headers: withAuth() });
   if (!res.ok) throw new Error("Tools service unavailable");
   return res.json();
-}
-
-export async function syncEmbeddingConfig() {
-  const res = await fetch(`${API_BASE}/api/config/embed-sync`, {
-    method: "POST",
-    headers: withAuth(),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const message =
-      (data && (data.message || data.error)) || res.statusText || "Failed";
-    throw new Error(message);
-  }
-  return data;
 }
 
 export async function callTool(name: string, args: Record<string, unknown>) {

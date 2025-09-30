@@ -34,7 +34,11 @@ function formatTool(tool) {
 function describeToolForDebug(tool) {
   if (!tool || typeof tool !== "object") return null;
   const schema =
-    tool.inputSchema || tool.input_schema || tool.parameters || tool.args || null;
+    tool.inputSchema ||
+    tool.input_schema ||
+    tool.parameters ||
+    tool.args ||
+    null;
   const clone = {
     name: tool.name,
     description: tool.description || null,
@@ -73,11 +77,15 @@ function parseSchemaTables(schemaText) {
 
 function selectPrimaryTable(tableHints, tableNames) {
   if (Array.isArray(tableHints)) {
-    const match = tableHints.find((name) => typeof name === "string" && name.trim());
+    const match = tableHints.find(
+      (name) => typeof name === "string" && name.trim()
+    );
     if (match) return match.trim();
   }
   if (Array.isArray(tableNames)) {
-    const match = tableNames.find((name) => typeof name === "string" && name.trim());
+    const match = tableNames.find(
+      (name) => typeof name === "string" && name.trim()
+    );
     if (match) return match.trim();
   }
   return null;
@@ -154,7 +162,9 @@ function buildPlannerUserPrompt({
     Array.isArray(tableHints) && tableHints.length > 0
       ? `Likely relevant tables: ${tableHints.join(", ")}.`
       : "";
-  return `User request:\n${prompt.trim()}\n\n${header}\n${toolSummaries}\n\n${tableLine}\nSchema summary (may be truncated):\n${summarizeSchema(schema)}`;
+  return `User request:\n${prompt.trim()}\n\n${header}\n${toolSummaries}\n\n${tableLine}\nSchema summary (may be truncated):\n${summarizeSchema(
+    schema
+  )}`;
 }
 
 export async function planToolUsage({
@@ -200,6 +210,8 @@ export async function planToolUsage({
   const embeddingRanking = await rankToolsWithEmbedding({
     prompt,
     limit: 8,
+    schema,
+    systemPrompt: buildPlannerSystemPrompt(),
   });
 
   const embeddingTools = Array.isArray(embeddingRanking?.tools)
@@ -208,7 +220,9 @@ export async function planToolUsage({
   const embeddingTableHints = Array.isArray(embeddingRanking?.tableHints)
     ? embeddingRanking.tableHints
         .map((hint) =>
-          typeof hint?.name === "string" && hint.name.trim() ? hint.name.trim() : null
+          typeof hint?.name === "string" && hint.name.trim()
+            ? hint.name.trim()
+            : null
         )
         .filter(Boolean)
     : [];

@@ -23,6 +23,8 @@ class EmbedResponse(BaseModel):
 class RankRequest(BaseModel):
     prompt: str = Field(..., min_length=1)
     limit: int = Field(6, gt=0)
+    schema: Optional[str] = Field(None, description="JSON string or object for DB schema")
+    system_prompt: Optional[str] = Field(None, description="Optional system prompt (not used for embedding)")
 
 
 class RankTablesResponse(BaseModel):
@@ -210,12 +212,30 @@ def embed_texts(request: TextsRequest):
 
 @app.post("/rank/tools", response_model=RankToolsResponse)
 def rank_tools(request: RankRequest):
+    if request.schema:
+        try:
+            schema_obj = json.loads(request.schema) if isinstance(request.schema, str) else request.schema
+            if isinstance(schema_obj, dict):
+                state.set_schema(schema_obj)
+            else:
+                raise ValueError("schema must be a JSON object")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid schema: {e}")
     tools, table_hints = state.rank_tools(request.prompt, request.limit)
     return {"tools": tools, "tableHints": table_hints}
 
 
 @app.post("/rank/tables", response_model=RankTablesResponse)
 def rank_tables(request: RankRequest):
+    if request.schema:
+        try:
+            schema_obj = json.loads(request.schema) if isinstance(request.schema, str) else request.schema
+            if isinstance(schema_obj, dict):
+                state.set_schema(schema_obj)
+            else:
+                raise ValueError("schema must be a JSON object")
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid schema: {e}")
     tables = state.rank_tables(request.prompt, request.limit)
     return {"tables": tables}
 
@@ -224,31 +244,3 @@ def rank_tables(request: RankRequest):
 def toolset_info():
     return state.info()
 
-
-# ---------- Config API'leri ----------
-@app.get("/config")
-def get_config():
-    return {
-        "model": DEFAULT_MODEL_NAME,
-        "toolCount": len(state.tools),
-        "tableCount": len(state.tables),
-        "generatedAt": state.generated_at,
-    }
-
-
-@app.put("/config/toolset")
-def set_toolset(data: dict = Body(...)):
-    try:
-        state.set_toolset(data)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", "toolCount": len(state.tools)}
-
-
-@app.put("/config/schema")
-def set_schema(data: dict = Body(...)):
-    try:
-        state.set_schema(data)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", "tableCount": len(state.tables)}

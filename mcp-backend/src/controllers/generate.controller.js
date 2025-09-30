@@ -1,5 +1,4 @@
 import { sendJSON } from "../utils/response.js";
-import { getConfig, saveConfig } from "../services/config.service.js";
 import { callDeepseekForSql } from "../services/deepseek.service.js";
 import { callCustomForSql } from "../services/custom.service.js";
 import { callGeminiForSql } from "../services/gemini.service.js";
@@ -90,21 +89,6 @@ async function executeSqlThroughMcp(sql) {
   return { result, durationMs };
 }
 
-export async function reloadSchema(req, res) {
-  const fileSchema = tryLoadSchemaSummary();
-  if (!fileSchema) {
-    return sendJSON(res, 404, {
-      error: "schema.summary.json not found or empty",
-    });
-  }
-  const updated = saveConfig({ schema: fileSchema });
-  return sendJSON(res, 200, {
-    message: "Schema reloaded from file",
-    length: fileSchema.length,
-    config: { schemaLength: (updated.schema || "").length },
-  });
-}
-
 export async function generateHandler(req, res) {
   const body = req.body || {};
   const requesterMetadata = buildRequesterMetadata(req);
@@ -126,16 +110,12 @@ export async function generateHandler(req, res) {
     });
   }
 
-  const config = getConfig();
   let schemaToUse = "";
   let schemaSource = "none";
 
   if (typeof customSchema === "string" && customSchema.trim()) {
     schemaToUse = customSchema.trim();
     schemaSource = "custom";
-  } else if (typeof config.schema === "string" && config.schema.trim()) {
-    schemaToUse = config.schema.trim();
-    schemaSource = "config";
   } else {
     const fileSchema = tryLoadSchemaSummary();
     if (fileSchema) {
@@ -148,7 +128,6 @@ export async function generateHandler(req, res) {
         schemaSource = autoSchema.source || "fetched";
         if (schemaSource === "fetched") {
           try {
-            saveConfig({ schema: schemaToUse });
           } catch (persistErr) {
             console.warn(
               `Failed to persist fetched schema: ${persistErr.message}`
@@ -168,17 +147,13 @@ export async function generateHandler(req, res) {
     totalDurationMs: 0,
   };
   const toolsetEnabled =
-    typeof body.useToolset === "boolean"
-      ? body.useToolset
-      : !!config?.toolset?.enabled;
+    typeof body.useToolset === "boolean" ? body.useToolset : false;
   const toolsetName =
     typeof body.toolsetName === "string" && body.toolsetName.trim()
       ? body.toolsetName.trim()
-      : typeof config?.toolset?.name === "string"
-      ? config.toolset.name.trim()
       : null;
-  const customApiBase =
-    config?.providers?.custom?.apiBase || process.env.CUSTOM_API_BASE;
+  const customApiBase = process.env.CUSTOM_API_BASE || "";
+  const systemPromptBase = process.env.SYSTEM_PROMPT || "";
 
   let executionStrategy = "sql";
   let toolCallInfo = null;
@@ -193,14 +168,12 @@ export async function generateHandler(req, res) {
         return requestedModel.trim();
       }
       if (useProvider === "gemini") {
-        return (
-          config?.providers?.gemini?.model || process.env.GEMINI_MODEL || null
-        );
+        return process.env.GEMINI_MODEL || null;
       }
       if (useProvider === "custom") {
         return undefined;
       }
-      return config.model || undefined;
+      return process.env.DEEPSEEK_MODEL || undefined;
     })();
 
     if (toolsetEnabled) {
@@ -404,20 +377,20 @@ export async function generateHandler(req, res) {
         ? await callCustomForSql({
             userPrompt: prompt,
             schema: schemaToUse,
-            systemPrompt: config.system_prompt,
+            systemPrompt: systemPromptBase,
             apiBase: customApiBase,
           })
         : useProvider === "gemini"
         ? await callGeminiForSql({
             userPrompt: prompt,
             schema: schemaToUse,
-            systemPrompt: config.system_prompt,
+            systemPrompt: systemPromptBase,
             model: modelToUse,
           })
         : await callDeepseekForSql({
             userPrompt: prompt,
             schema: schemaToUse,
-            systemPrompt: config.system_prompt,
+            systemPrompt: systemPromptBase,
             model: modelToUse,
           });
 
@@ -510,7 +483,21 @@ export async function generateHandler(req, res) {
 
     return sendJSON(res, 200, responsePayload);
   } catch (err) {
-    console.error("Generation pipeline failed:", err.message);
+    const cause = err?.cause || err;
+    const causeInfo = {
+      code: cause?.code || null,
+      errno: cause?.errno || null,
+      address: cause?.address || null,
+      port: cause?.port || null,
+      name: cause?.name || null,
+    };
+    try {
+      console.error("Generation pipeline failed:", err.message);
+      console.error("cause:", JSON.stringify(causeInfo));
+      if (err?.stack) {
+        console.error(err.stack);
+      }
+    } catch {}
     const duration = Date.now() - startTime;
     debugInfo.totalDurationMs = duration;
     const errorMetadata = {};
@@ -548,6 +535,7 @@ export async function generateHandler(req, res) {
       return sendJSON(res, 500, {
         error: "Pipeline failed",
         message: err.message,
+        cause: causeInfo,
         debug: {
           mode: "enabled",
           totalDurationMs: duration,
@@ -565,6 +553,7 @@ export async function generateHandler(req, res) {
     return sendJSON(res, 500, {
       error: "Pipeline failed",
       message: err.message,
+      cause: causeInfo,
     });
   }
 }

@@ -8,12 +8,7 @@ import {
   SqlCard,
 } from "./QueryResults";
 import DebugPanel from "./DebugPanel";
-import {
-  AppConfig,
-  DebugPayload,
-  PlannerSummary,
-  ToolCallInfo,
-} from "../../types/home";
+import { DebugPayload, PlannerSummary, ToolCallInfo } from "../../types/home";
 import { schemaSourceLabel } from "../../utils/format";
 
 export default function QueryTab({
@@ -28,7 +23,6 @@ export default function QueryTab({
   raw,
   useToolset,
   onToggleToolset,
-  config,
   strategy,
   toolCall,
   plannerInfo,
@@ -50,7 +44,6 @@ export default function QueryTab({
   raw: unknown;
   useToolset: boolean;
   onToggleToolset: (value: boolean) => void;
-  config: AppConfig | null;
   strategy: "tool" | "sql" | null;
   toolCall: ToolCallInfo | null;
   plannerInfo: PlannerSummary | null;
@@ -88,17 +81,7 @@ export default function QueryTab({
                   When enabled, the assistant tries available tools before
                   generating SQL.
                 </p>
-                {useToolset && (
-                  <p className="text-[11px] text-amber-300 mt-1">
-                    The embedding service must be running for toolset mode to
-                    work.{" "}
-                    {config?.embedding?.url
-                      ? `(${config.embedding.url}${
-                          config?.embedding?.status ? " online" : " unreachable"
-                        })`
-                      : "(EMBED_LLM_URL not configured)"}
-                  </p>
-                )}
+                {/* embedding service note hidden */}
               </div>
               <label className="flex items-center gap-2 text-sm text-zinc-200 cursor-pointer select-none">
                 <input

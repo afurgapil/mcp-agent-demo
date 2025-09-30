@@ -6,24 +6,16 @@ import { useRouter } from "next/navigation";
 import {
   getDebugStatus,
   toggleDebug as apiToggleDebug,
-  fetchConfig as apiFetchConfig,
-  updateConfig as apiUpdateConfig,
   fetchTools as apiFetchTools,
   callTool as apiCallTool,
   generate as apiGenerate,
-  syncEmbeddingConfig as apiSyncEmbedding,
 } from "../services/api";
 import HomeHeader from "../components/home/HomeHeader";
 import QueryTab from "../components/home/QueryTab";
 import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
-import ConfigurationPanel from "../components/home/ConfigurationPanel";
+// import ConfigurationPanel from "../components/home/ConfigurationPanel";
 import LoadingOverlay from "../components/home/LoadingOverlay";
-import type {
-  AppConfig,
-  DebugPayload,
-  PlannerSummary,
-  ToolCallInfo,
-} from "../types/home";
+import type { DebugPayload, PlannerSummary, ToolCallInfo } from "../types/home";
 
 const MODEL_STORAGE_KEY = "mcp_ui_model";
 
@@ -84,7 +76,7 @@ export default function Home() {
           : null;
       if (savedModel) setModel(savedModel);
     } catch {}
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     try {
@@ -106,12 +98,7 @@ export default function Home() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<"query" | "config" | "tools">(
-    "query"
-  );
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [configLoading, setConfigLoading] = useState(false);
-  const [configError, setConfigError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"query" | "tools">("query");
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -128,7 +115,7 @@ export default function Home() {
   const [toolCall, setToolCall] = useState<ToolCallInfo | null>(null);
   const [plannerInfo, setPlannerInfo] = useState<PlannerSummary | null>(null);
   const [plannerDebug, setPlannerDebug] = useState<unknown>(null);
-  const [syncingEmbedding, setSyncingEmbedding] = useState(false);
+  // const [syncingEmbedding, setSyncingEmbedding] = useState(false);
 
   const categorizeTools = (toolsList: ToolDefinition[]) => {
     const categories: Record<string, ToolDefinition[]> = {};
@@ -194,60 +181,10 @@ export default function Home() {
   };
 
   useEffect(() => {
-    loadConfig();
     loadTools();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    loadConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model]);
-
-  useEffect(() => {
-    if (config) {
-      setUseToolset(!!config.toolset?.enabled);
-    }
-  }, [config]);
-
-  async function loadConfig() {
-    setConfigLoading(true);
-    setConfigError(null);
-    try {
-      const data = await apiFetchConfig(
-        model === "custom" ? "custom" : "deepseek"
-      );
-      setConfig({
-        system_prompt: data.system_prompt,
-        schema: data.schema || "",
-        toolset: data.toolset,
-        embedding: data.embedding,
-      });
-      if (!model && typeof (data as { model?: string })?.model === "string") {
-        setModel(((data as { model?: string }).model as string) || "");
-      }
-    } catch (err: unknown) {
-      console.warn("Configuration fetch failed:", err);
-      setConfig(null);
-    } finally {
-      setConfigLoading(false);
-    }
-  }
-
-  const syncEmbedding = async () => {
-    if (syncingEmbedding) return;
-    setSyncingEmbedding(true);
-    try {
-      await apiSyncEmbedding();
-      await loadConfig();
-    } catch (err: unknown) {
-      setConfigError(
-        err instanceof Error ? err.message : "Embedding sync failed"
-      );
-    } finally {
-      setSyncingEmbedding(false);
-    }
-  };
+  useEffect(() => {}, [model]);
 
   async function loadTools() {
     setToolsLoading(true);
@@ -292,32 +229,25 @@ export default function Home() {
     }
   }
 
-  async function saveConfig(newConfig: {
-    system_prompt?: string;
-    schema?: string;
-    toolset?: {
-      enabled?: boolean;
-      name?: string;
-    };
-  }) {
-    setConfigLoading(true);
-    setConfigError(null);
-    try {
-      await apiUpdateConfig(
-        newConfig,
-        model === "custom" ? "custom" : "deepseek"
-      );
-      await loadConfig();
-      return true;
-    } catch (err: unknown) {
-      setConfigError(
-        err instanceof Error ? err.message : "Failed to save configuration"
-      );
-      return false;
-    } finally {
-      setConfigLoading(false);
-    }
-  }
+  // async function saveConfig(newConfig: {
+  //   system_prompt?: string;
+  //   schema?: string;
+  //   toolset?: {
+  //     enabled?: boolean;
+  //     name?: string;
+  //   };
+  // }) {
+  //   try {
+  //     await apiUpdateConfig(
+  //       newConfig,
+  //       model === "custom" ? "custom" : "deepseek"
+  //     );
+  //     await loadConfig();
+  //     return true;
+  //   } catch (err: unknown) {
+  //     return false;
+  //   }
+  // }
 
   const handleClear = () => {
     setQuery("");
@@ -454,7 +384,6 @@ export default function Home() {
             raw={raw}
             useToolset={useToolset}
             onToggleToolset={setUseToolset}
-            config={config}
             strategy={strategy}
             toolCall={toolCall}
             plannerInfo={plannerInfo}
@@ -486,16 +415,7 @@ export default function Home() {
           />
         )}
 
-        {activeTab === "config" && (
-          <ConfigurationPanel
-            config={config}
-            loading={configLoading}
-            error={configError}
-            onSave={saveConfig}
-            onSyncEmbedding={syncEmbedding}
-            syncingEmbedding={syncingEmbedding}
-          />
-        )}
+        {/* config tab removed */}
       </div>
       {loading && <LoadingOverlay />}
     </div>
