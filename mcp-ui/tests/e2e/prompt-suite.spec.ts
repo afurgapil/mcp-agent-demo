@@ -34,7 +34,7 @@ const promptTimeoutMs = 0;
 const API_BASE = (
   process.env.NEXT_PUBLIC_API_BASE || "http://localhost:3001"
 ).replace(/\/$/, "");
-const LOGIN_EMAIL = process.env.PLAYWRIGHT_LOGIN_EMAIL || "admin@barfas.com";
+const LOGIN_EMAIL = process.env.PLAYWRIGHT_LOGIN_EMAIL || "admin@example.com";
 const LOGIN_PASSWORD = process.env.PLAYWRIGHT_LOGIN_PASSWORD || "Admin123!";
 
 async function loginAndSeedToken(
