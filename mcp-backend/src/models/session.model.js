@@ -19,7 +19,7 @@ const SessionSchema = new mongoose.Schema(
   {
     sessionId: { type: String, unique: true, index: true, required: true },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
-    title: { type: String, default: "Yeni sohbet" },
+    title: { type: String, default: "New Chat" },
     messages: { type: [ChatMessageSchema], default: [] },
   },
   { timestamps: true }

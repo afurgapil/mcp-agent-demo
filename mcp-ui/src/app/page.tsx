@@ -27,6 +27,7 @@ import ChatTab from "../components/home/ChatTab";
 import ToolsPanel, { type ToolDefinition } from "../components/home/ToolsPanel";
 import SavedPrompts from "../components/home/SavedPrompts";
 import LoadingOverlay from "../components/home/LoadingOverlay";
+import BulkInsertTab from "../components/home/BulkInsertTab";
 import type {
   DebugPayload,
   PlannerSummary,
@@ -135,7 +136,7 @@ export default function Home() {
   };
 
   const [activeTab, setActiveTab] = useState<
-    "chat" | "query" | "tools" | "history"
+    "chat" | "query" | "tools" | "history" | "insert"
   >("chat");
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
@@ -311,7 +312,7 @@ export default function Home() {
     let sid = currentSessionId;
     if (!sid) {
       try {
-        const s = await createSession(query.slice(0, 60) || "Yeni sohbet");
+        const s = await createSession(query.slice(0, 60) || "New Chat");
         setSessions((prev) => [s, ...prev]);
         setCurrentSessionId(s.sessionId);
         sid = s.sessionId;
@@ -461,7 +462,7 @@ export default function Home() {
             <aside className="hidden md:block w-60 lg:w-56 shrink-0">
               <div className="sticky top-4">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-zinc-400">Menü</div>
+                  <div className="text-xs text-zinc-400">Menu</div>
                   <button
                     className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                     onClick={() => setLeftCollapsed(true)}
@@ -515,25 +516,25 @@ export default function Home() {
                   <aside className="hidden lg:block w-56 shrink-0">
                     <div className="sticky top-4 rounded-2xl border border-zinc-800/60 bg-zinc-900/40 p-3">
                       <div className="flex items-center justify-between mb-2">
-                        <div className="text-xs text-zinc-400">Sohbetler</div>
+                        <div className="text-xs text-zinc-400">Chats</div>
                         <div className="flex items-center gap-2">
                           <button
                             className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                             onClick={async () => {
                               try {
-                                const s = await createSession("Yeni sohbet");
+                                const s = await createSession("New Chat");
                                 setSessions((prev) => [s, ...prev]);
                                 setCurrentSessionId(s.sessionId);
                                 setMessages([]);
                               } catch {}
                             }}
                           >
-                            Yeni
+                            New
                           </button>
                           <button
                             className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                             onClick={() => setRightCollapsed(true)}
-                            title="Paneli gizle"
+                            title="Hide panel"
                           >
                             ➜
                           </button>
@@ -576,7 +577,7 @@ export default function Home() {
                             <div className="flex items-center gap-1">
                               <button
                                 className="p-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                                title="Rename"
+                                title="Rename chat"
                                 onClick={() =>
                                   setRenameTarget({
                                     id: s.sessionId,
@@ -588,7 +589,7 @@ export default function Home() {
                               </button>
                               <button
                                 className="p-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                                title="Delete"
+                                title="Delete chat"
                                 onClick={() => setDeleteTarget(s.sessionId)}
                               >
                                 🗑️
@@ -598,7 +599,7 @@ export default function Home() {
                         ))}
                         {sessions.length === 0 && (
                           <div className="text-[11px] text-zinc-500">
-                            Henüz sohbet yok
+                            No chats yet
                           </div>
                         )}
                       </div>
@@ -609,7 +610,7 @@ export default function Home() {
                   <button
                     className="hidden md:block absolute left-2 top-0 mt-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                     onClick={() => setLeftCollapsed(false)}
-                    title="Menüyü göster"
+                    title="Show menu"
                   >
                     ⟩
                   </button>
@@ -618,7 +619,7 @@ export default function Home() {
                   <button
                     className="hidden lg:block absolute right-2 top-0 mt-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                     onClick={() => setRightCollapsed(false)}
-                    title="Sohbetleri göster"
+                    title="Show chats"
                   >
                     ◀
                   </button>
@@ -645,6 +646,167 @@ export default function Home() {
               />
             )}
 
+            {activeTab === "insert" && (
+              <BulkInsertTab
+                fetchTables={async () => {
+                  try {
+                    // Ensure the tool exists and call it
+                    const result = await executeTool("mysql_show_tables", {});
+                    function isRecord(
+                      val: unknown
+                    ): val is Record<string, unknown> {
+                      return typeof val === "object" && val !== null;
+                    }
+                    // Try rows shape first
+                    let tables: string[] = [];
+                    if (isRecord(result)) {
+                      const rowsVal = (result as Record<string, unknown>)[
+                        "rows"
+                      ];
+                      if (Array.isArray(rowsVal)) {
+                        for (const r of rowsVal) {
+                          if (isRecord(r)) {
+                            const first = Object.values(r)[0];
+                            if (typeof first === "string") tables.push(first);
+                          }
+                        }
+                      }
+                      if (tables.length === 0) {
+                        const contentVal = (result as Record<string, unknown>)[
+                          "content"
+                        ];
+                        if (Array.isArray(contentVal)) {
+                          const collected: string[] = [];
+                          for (const item of contentVal) {
+                            if (isRecord(item)) {
+                              const textVal = item["text"];
+                              if (typeof textVal === "string") {
+                                const raw = textVal;
+                                try {
+                                  const obj = JSON.parse(raw);
+                                  if (isRecord(obj)) {
+                                    const first = Object.values(obj)[0];
+                                    if (typeof first === "string")
+                                      collected.push(first);
+                                  }
+                                } catch {
+                                  const t = raw.trim();
+                                  if (t) collected.push(t);
+                                }
+                              }
+                            }
+                          }
+                          tables = collected;
+                        }
+                      }
+                    }
+                    const unique = Array.from(new Set(tables)).filter(
+                      (x): x is string => typeof x === "string" && x.length > 0
+                    );
+                    return unique;
+                  } catch {
+                    return [];
+                  }
+                }}
+                describeTable={async (table: string) => {
+                  try {
+                    const res = await executeTool("mysql_describe_table", {
+                      tableName: table,
+                    });
+                    function isRecord(
+                      val: unknown
+                    ): val is Record<string, unknown> {
+                      return typeof val === "object" && val !== null;
+                    }
+                    if (isRecord(res)) {
+                      const rowsVal = (res as Record<string, unknown>)["rows"];
+                      if (Array.isArray(rowsVal)) {
+                        return rowsVal as Array<Record<string, unknown>>;
+                      }
+                      const contentVal = (res as Record<string, unknown>)[
+                        "content"
+                      ];
+                      if (Array.isArray(contentVal)) {
+                        const rows: Array<Record<string, unknown>> = [];
+                        for (const item of contentVal) {
+                          if (
+                            isRecord(item) &&
+                            typeof item["text"] === "string"
+                          ) {
+                            try {
+                              const obj = JSON.parse(String(item["text"]));
+                              if (Array.isArray(obj)) {
+                                for (const r of obj)
+                                  if (isRecord(r)) rows.push(r);
+                              } else if (isRecord(obj)) {
+                                rows.push(obj);
+                              }
+                            } catch {}
+                          }
+                        }
+                        return rows.length > 0 ? rows : null;
+                      }
+                    }
+                    return null;
+                  } catch {
+                    return null;
+                  }
+                }}
+                viewTableData={async (
+                  table: string,
+                  limit: number,
+                  offset: number
+                ) => {
+                  try {
+                    const res = await executeTool("list_table_limited", {
+                      tableName: table,
+                      limit,
+                      offset,
+                    });
+                    function isRecord(
+                      val: unknown
+                    ): val is Record<string, unknown> {
+                      return typeof val === "object" && val !== null;
+                    }
+                    if (isRecord(res)) {
+                      const rowsVal = (res as Record<string, unknown>)["rows"];
+                      if (Array.isArray(rowsVal))
+                        return rowsVal as Array<Record<string, unknown>>;
+                      const contentVal = (res as Record<string, unknown>)[
+                        "content"
+                      ];
+                      if (Array.isArray(contentVal)) {
+                        const rows: Array<Record<string, unknown>> = [];
+                        for (const item of contentVal) {
+                          if (
+                            isRecord(item) &&
+                            typeof item["text"] === "string"
+                          ) {
+                            try {
+                              const obj = JSON.parse(String(item["text"]));
+                              if (Array.isArray(obj)) {
+                                for (const r of obj)
+                                  if (isRecord(r)) rows.push(r);
+                              } else if (isRecord(obj)) {
+                                rows.push(obj);
+                              }
+                            } catch {}
+                          }
+                        }
+                        return rows;
+                      }
+                    }
+                    return [];
+                  } catch {
+                    return [];
+                  }
+                }}
+                executeSql={async (sql: string) => {
+                  return await executeTool("mysql_execute_sql", { sql });
+                }}
+              />
+            )}
+
             {activeTab === "history" && <SavedPrompts />}
           </main>
         </div>
@@ -652,12 +814,12 @@ export default function Home() {
       {loading && activeTab !== "chat" && <LoadingOverlay />}
       <ConfirmModal
         open={!!renameTarget}
-        title="Sohbeti Yeniden Adlandır"
-        description="Yeni bir başlık girin."
-        inputPlaceholder="Başlık"
+        title="Rename chat"
+        description="Enter a new title."
+        inputPlaceholder="Title"
         defaultValue={renameTarget?.oldTitle || ""}
-        confirmText="Kaydet"
-        cancelText="İptal"
+        confirmText="Save"
+        cancelText="Cancel"
         onConfirm={async (val) => {
           if (!renameTarget) return;
           try {
@@ -678,10 +840,10 @@ export default function Home() {
       />
       <ConfirmModal
         open={!!deleteTarget}
-        title="Sohbeti Sil"
-        description="Bu işlemi geri alamazsınız."
-        confirmText="Sil"
-        cancelText="Vazgeç"
+        title="Delete chat"
+        description="This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
         onConfirm={async () => {
           if (!deleteTarget) return;
           try {

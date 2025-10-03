@@ -1,26 +1,11 @@
 "use client";
 
-import { ReactNode } from "react";
-
-const tabs: Array<{
-  id: "chat" | "query" | "tools" | "history";
-  label: string;
-  icon: ReactNode;
-}> = [
-  { id: "chat", label: "Chat", icon: "💬" },
-  { id: "query", label: "Query", icon: "🧠" },
-  { id: "tools", label: "Tools", icon: "🛠️" },
-  { id: "history", label: "History", icon: "💾" },
-  // config tab is intentionally hidden for now
-];
-
 export default function HomeHeader({
   model,
   onModelChange,
   debugMode,
   onToggleDebug,
-  activeTab,
-  onTabChange,
+
   companyName,
   branchName,
 }: {
@@ -28,8 +13,8 @@ export default function HomeHeader({
   onModelChange: (value: string) => void;
   debugMode: boolean;
   onToggleDebug: () => void;
-  activeTab: "chat" | "query" | "tools" | "history";
-  onTabChange: (tab: "chat" | "query" | "tools" | "history") => void;
+  activeTab: "chat" | "query" | "tools" | "history" | "insert";
+  onTabChange: (tab: "chat" | "query" | "tools" | "history" | "insert") => void;
   companyName?: string | null;
   branchName?: string | null;
 }) {
@@ -88,7 +73,7 @@ export default function HomeHeader({
             href="/logout"
             className="text-xs px-4 py-2 rounded-xl bg-red-600/90 hover:bg-red-500 border border-red-500/60 text-white"
           >
-            Çıkış
+            Logout
           </a>
         </div>
       </div>

@@ -4,16 +4,17 @@ export default function SidebarTabs({
   active,
   onChange,
 }: {
-  active: "chat" | "query" | "tools" | "history";
-  onChange: (t: "chat" | "query" | "tools" | "history") => void;
+  active: "chat" | "query" | "tools" | "history" | "insert";
+  onChange: (t: "chat" | "query" | "tools" | "history" | "insert") => void;
 }) {
   const items: Array<{
-    id: "chat" | "query" | "tools" | "history";
+    id: "chat" | "query" | "tools" | "history" | "insert";
     label: string;
     icon: string;
   }> = [
     { id: "chat", label: "Chat", icon: "💬" },
     { id: "query", label: "Query", icon: "🧠" },
+    { id: "insert", label: "Insert", icon: "📥" },
     { id: "tools", label: "Tools", icon: "🛠️" },
     { id: "history", label: "History", icon: "💾" },
   ];

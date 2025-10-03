@@ -15,7 +15,7 @@ router.post("/sessions", authenticate(), async (req, res) => {
       title:
         title && String(title).trim()
           ? String(title).trim().slice(0, 120)
-          : "Yeni sohbet",
+          : "New Chat",
       messages: [],
     });
     res.json({
