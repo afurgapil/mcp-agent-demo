@@ -9,6 +9,7 @@ import {
 } from "../services/schema.service.js";
 import { callTool, listTools } from "../services/mcp.service.js";
 import { planToolUsage } from "../services/toolset.service.js";
+import { searchEntities as retrievalSearchEntities } from "../services/retrieval.service.js";
 import { getIsDebugMode } from "./debug.controller.js";
 import { logTrainingExample } from "../services/training-log.service.js";
 
@@ -153,7 +154,6 @@ export async function generateHandler(req, res) {
       ? body.toolsetName.trim()
       : null;
   const customApiBase = process.env.CUSTOM_API_BASE || "";
-  const systemPromptBase = process.env.SYSTEM_PROMPT || "";
 
   let executionStrategy = "sql";
   let toolCallInfo = null;
@@ -372,23 +372,60 @@ export async function generateHandler(req, res) {
         };
       }
     }
+    // Build generation prompt with retrieval filter hints (RAG Phase 3, optional)
+    let generationPrompt = prompt;
+    const useRagHints =
+      typeof body.useRagHints === "boolean"
+        ? body.useRagHints
+        : String(process.env.USE_RAG_HINTS || "false").toLowerCase() === "true";
+    if (useRagHints) {
+      try {
+        let filterHints = [];
+        if (
+          plannerDetails?.debug?.filterHints &&
+          Array.isArray(plannerDetails.debug.filterHints)
+        ) {
+          filterHints = plannerDetails.debug.filterHints;
+        } else {
+          const entityResp = await retrievalSearchEntities({
+            query: prompt,
+            types: null,
+            limit: 5,
+          });
+          if (entityResp && Array.isArray(entityResp.results)) {
+            filterHints = entityResp.results;
+          }
+        }
+        if (filterHints.length) {
+          const mapped = filterHints
+            .slice(0, 5)
+            .map((e) => `${e.type || "entity"}=${e.text}`)
+            .join(", ");
+          const hintBlock = `Entity hints: ${mapped}\n- If device_name is present, prefer WHERE devices.name = 'VALUE'\n- If location is present, prefer WHERE locations.name = 'VALUE' or devices.location = 'VALUE'\n`;
+          generationPrompt = `${hintBlock}\n${prompt}`;
+        }
+      } catch {
+        // best-effort only
+      }
+    }
+
     const llmResponse =
       useProvider === "custom"
         ? await callCustomForSql({
-            userPrompt: prompt,
+            userPrompt: generationPrompt,
             schema: schemaToUse,
             systemPrompt: systemPromptBase,
             apiBase: customApiBase,
           })
         : useProvider === "gemini"
         ? await callGeminiForSql({
-            userPrompt: prompt,
+            userPrompt: generationPrompt,
             schema: schemaToUse,
             systemPrompt: systemPromptBase,
             model: modelToUse,
           })
         : await callDeepseekForSql({
-            userPrompt: prompt,
+            userPrompt: generationPrompt,
             schema: schemaToUse,
             systemPrompt: systemPromptBase,
             model: modelToUse,

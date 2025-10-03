@@ -2,6 +2,7 @@ import { callDeepseekChat } from "./deepseek.service.js";
 import { callGeminiChat } from "./gemini.service.js";
 import { callCustomChat } from "./custom.service.js";
 import { rankToolsWithEmbedding } from "./embedding.service.js";
+import { searchEntities as retrievalSearchEntities } from "./retrieval.service.js";
 
 function summarizeSchema(schema, limit = 4000) {
   if (!schema || typeof schema !== "string") return "(schema not provided)";
@@ -153,6 +154,7 @@ function buildPlannerUserPrompt({
   tools,
   toolsetName,
   tableHints,
+  filterHints,
 }) {
   const header = toolsetName
     ? `Available tools in toolset \"${toolsetName}\":`
@@ -162,7 +164,13 @@ function buildPlannerUserPrompt({
     Array.isArray(tableHints) && tableHints.length > 0
       ? `Likely relevant tables: ${tableHints.join(", ")}.`
       : "";
-  return `User request:\n${prompt.trim()}\n\n${header}\n${toolSummaries}\n\n${tableLine}\nSchema summary (may be truncated):\n${summarizeSchema(
+  const filterLine =
+    Array.isArray(filterHints) && filterHints.length > 0
+      ? `Likely entity filters: ${filterHints
+          .map((e) => (e.type ? `${e.type}=${e.text}` : e.text))
+          .join(", ")}.`
+      : "";
+  return `User request:\n${prompt.trim()}\n\n${header}\n${toolSummaries}\n\n${tableLine}\n${filterLine}\nSchema summary (may be truncated):\n${summarizeSchema(
     schema
   )}`;
 }
@@ -232,6 +240,28 @@ export async function planToolUsage({
     ? embeddingTableHints
     : tableNames.slice(0, 3);
 
+  // Retrieve entity-level hints via retrieval service (RAG Phase 3)
+  let filterHints = [];
+  try {
+    const entityResp = await retrievalSearchEntities({
+      query: prompt,
+      types: null,
+      limit: 10,
+    });
+    if (entityResp && Array.isArray(entityResp.results)) {
+      filterHints = entityResp.results.map((r) => ({
+        id: r.id,
+        type: r.type,
+        text: r.text,
+        score: r.score,
+        metadata: r.metadata || null,
+      }));
+    }
+  } catch (err) {
+    // best-effort only
+    filterHints = [];
+  }
+
   const plannerTools = embeddingTools.length
     ? embeddingTools
         .map((item) => {
@@ -263,6 +293,7 @@ export async function planToolUsage({
     tools: plannerTools,
     toolsetName,
     tableHints,
+    filterHints: filterHints.slice(0, 5),
   });
 
   let chatResult;
@@ -361,6 +392,7 @@ export async function planToolUsage({
       embedding: embeddingRanking || null,
       tableNames,
       tableHints,
+      filterHints,
       filteredTools: filtered.map((entry) => entry.name),
       plannerTools: plannerTools.map(describeToolForDebug),
       finalTool:

@@ -226,7 +226,7 @@ export default function ChatTab({
       <form ref={formRef} onSubmit={onSubmit} className="space-y-3">
         <textarea
           className="w-full h-28 rounded-2xl border border-zinc-700/50 bg-zinc-800/50 backdrop-blur-sm text-zinc-100 placeholder:text-zinc-500 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 shadow-xl transition-all duration-300"
-          placeholder="Mesajınızı yazın..."
+          placeholder="Write your message..."
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           data-testid="prompt-input"
@@ -248,7 +248,7 @@ export default function ChatTab({
             disabled={loading || !query.trim()}
             data-testid="submit-button"
           >
-            Send
+            Send message
           </button>
         </div>
       </form>
@@ -273,7 +273,7 @@ export default function ChatTab({
           }
         }}
         initialTitle={saveDraft?.title || ""}
-        initialCategory={saveDraft?.category || "Genel"}
+        initialCategory={saveDraft?.category || "General"}
       />
     </div>
   );

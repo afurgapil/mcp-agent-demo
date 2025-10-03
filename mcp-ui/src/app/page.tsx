@@ -138,6 +138,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<
     "chat" | "query" | "tools" | "history" | "insert"
   >("chat");
+  const [useRagHints, setUseRagHints] = useState<boolean>(false);
 
   const [tools, setTools] = useState<ToolDefinition[]>([]);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -224,6 +225,19 @@ export default function Home() {
   useEffect(() => {
     loadTools();
   }, []);
+
+  // Load and persist RAG toggle
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("rag_hints");
+      if (saved != null) setUseRagHints(JSON.parse(saved));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("rag_hints", JSON.stringify(useRagHints));
+    } catch {}
+  }, [useRagHints]);
 
   useEffect(() => {}, [model]);
 
@@ -334,6 +348,7 @@ export default function Home() {
         provider: provider as "deepseek" | "custom",
         ...(model ? { model } : {}),
         useToolset,
+        useRagHints,
       });
       setRaw(data);
       setGeneratedSql(typeof data.sql === "string" ? data.sql : null);
@@ -451,6 +466,8 @@ export default function Home() {
           onModelChange={setModel}
           debugMode={debugMode}
           onToggleDebug={toggleDebugMode}
+          useRagHints={useRagHints}
+          onToggleRagHints={() => setUseRagHints((v) => !v)}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           companyName={me?.company?.name || null}
@@ -466,7 +483,7 @@ export default function Home() {
                   <button
                     className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
                     onClick={() => setLeftCollapsed(true)}
-                    title="Gizle"
+                    title="Hide"
                   >
                     ⟨
                   </button>

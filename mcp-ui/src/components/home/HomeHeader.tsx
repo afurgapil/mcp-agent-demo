@@ -5,6 +5,8 @@ export default function HomeHeader({
   onModelChange,
   debugMode,
   onToggleDebug,
+  useRagHints,
+  onToggleRagHints,
 
   companyName,
   branchName,
@@ -13,6 +15,8 @@ export default function HomeHeader({
   onModelChange: (value: string) => void;
   debugMode: boolean;
   onToggleDebug: () => void;
+  useRagHints: boolean;
+  onToggleRagHints: () => void;
   activeTab: "chat" | "query" | "tools" | "history" | "insert";
   onTabChange: (tab: "chat" | "query" | "tools" | "history" | "insert") => void;
   companyName?: string | null;
@@ -37,6 +41,17 @@ export default function HomeHeader({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleRagHints}
+            className={`px-3 py-2 rounded-lg text-sm border transition ${
+              useRagHints
+                ? "bg-green-500/10 text-green-200 border-green-500/30"
+                : "bg-zinc-900/50 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-900/70"
+            }`}
+            title="Toggle RAG hints in SQL generation"
+          >
+            RAG Hints: {useRagHints ? "On" : "Off"}
+          </button>
           {(companyName || branchName) && (
             <div className="text-xs px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50 text-zinc-300">
               <span>{companyName || "Firma"}</span>

@@ -65,6 +65,7 @@ export type GenerateRequest = {
   model?: string;
   useToolset?: boolean;
   toolsetName?: string;
+  useRagHints?: boolean;
 };
 
 export type GenerateResponse = {

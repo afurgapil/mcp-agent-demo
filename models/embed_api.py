@@ -1,7 +1,7 @@
 import json
 import os
 import threading
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Body
@@ -42,6 +42,36 @@ class ToolsetInfo(BaseModel):
     model: str
 
 
+# ---------- Entity API Model Tanımları ----------
+class EntityItem(BaseModel):
+    id: str
+    type: str
+    text: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class SetEntitiesRequest(BaseModel):
+    entities: List[EntityItem] = Field(..., min_length=1)
+
+
+class SearchEntitiesRequest(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    types: Optional[List[str]] = None
+    limit: int = Field(10, gt=0, le=200)
+
+
+class SearchEntityResult(BaseModel):
+    id: str
+    type: str
+    text: str
+    score: float
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class SearchEntitiesResponse(BaseModel):
+    results: List[SearchEntityResult]
+
+
 # ---------- Ana State Sınıfı ----------
 class EmbeddingState:
     def __init__(self):
@@ -52,6 +82,9 @@ class EmbeddingState:
         self.tool_embeddings: Optional[np.ndarray] = None
         self.table_embeddings: Optional[np.ndarray] = None
         self._lock = threading.RLock()
+        # Entities
+        self.entities: List[dict] = []  # {id,type,text,metadata}
+        self.entity_embeddings: Optional[np.ndarray] = None
 
     def load_model(self):
         if self.model is None:
@@ -145,6 +178,58 @@ class EmbeddingState:
                 entry["argumentSuggestions"] = suggested_args
             results.append(entry)
         return results, table_hints
+
+    # ---------- Entities ----------
+    def set_entities(self, items: List[dict]):
+        self.load_model()
+        with self._lock:
+            self.entities = items
+            texts = [item.get("text", "") for item in items]
+            if texts:
+                self.entity_embeddings = self.model.encode(
+                    texts, convert_to_numpy=True
+                )
+            else:
+                self.entity_embeddings = None
+
+    def search_entities(self, prompt: str, types: Optional[List[str]], limit: int) -> List[dict]:
+        self.ensure_loaded()
+        with self._lock:
+            if self.entity_embeddings is None or not self.entities:
+                return []
+            mask = None
+            if types:
+                types_set = set(types)
+                mask = np.array([ent.get("type") in types_set for ent in self.entities])
+                if not mask.any():
+                    return []
+                emb = self.entity_embeddings[mask]
+            else:
+                emb = self.entity_embeddings
+            prompt_vec = self.model.encode([prompt], convert_to_numpy=True)[0]
+            scores = cosine_similarity_matrix(prompt_vec, emb)
+            order = np.argsort(scores)[::-1][:limit]
+            # Map back to original indices
+            if types and mask is not None:
+                idx_map = np.flatnonzero(mask)
+                order = idx_map[order]
+                scores_full = scores  # already filtered
+            else:
+                scores_full = scores
+            results = []
+            for rank, idx in enumerate(order):
+                ent = self.entities[int(idx)]
+                score = float(scores_full[rank]) if rank < len(scores_full) else 0.0
+                results.append(
+                    {
+                        "id": ent.get("id"),
+                        "type": ent.get("type"),
+                        "text": ent.get("text"),
+                        "metadata": ent.get("metadata"),
+                        "score": score,
+                    }
+                )
+            return results
 
     def info(self) -> ToolsetInfo:
         self.ensure_loaded()
@@ -243,4 +328,36 @@ def rank_tables(request: RankRequest):
 @app.get("/toolset/info", response_model=ToolsetInfo)
 def toolset_info():
     return state.info()
+
+
+# ---------- Entity Endpoints ----------
+@app.post("/entities/index")
+def set_entities(request: SetEntitiesRequest):
+    items = [
+        {
+            "id": e.id,
+            "type": e.type,
+            "text": e.text,
+            "metadata": e.metadata or {},
+        }
+        for e in request.entities
+    ]
+    state.set_entities(items)
+    return {"ok": True, "count": len(items)}
+
+
+@app.post("/entities/search", response_model=SearchEntitiesResponse)
+def search_entities(request: SearchEntitiesRequest):
+    results = state.search_entities(request.prompt, request.types, request.limit)
+    typed = [
+        SearchEntityResult(
+            id=r.get("id"),
+            type=r.get("type"),
+            text=r.get("text"),
+            score=float(r.get("score", 0.0)),
+            metadata=r.get("metadata") or None,
+        )
+        for r in results
+    ]
+    return {"results": typed}
 
