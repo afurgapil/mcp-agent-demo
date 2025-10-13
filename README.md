@@ -116,12 +116,14 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
 ## Backend Setup (`mcp-backend/`)
 
 1. **Install dependencies**
+
    ```bash
    cd mcp-backend
    npm install
    ```
 
 2. **Create `.env`** – copy from `.env.example` and fill in required secrets.
+
    ```env
    GEMINI_API_KEY=
    DEEPSEEK_API_KEY=
@@ -140,23 +142,28 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
    ```
 
 3. **Generate schema & tool snapshots**
+
    ```bash
    npm run schema:mysql          # writes reports/schema.summary.json
    npm run export:toolset        # writes reports/toolset.snapshot.json
    ```
+
    These files are served to the LLM and pushed to the embedding service; regenerate whenever the DB schema or toolset changes.
 
 4. **Bootstrap authentication**
+
    ```bash
    npm run create:admin
    ```
+
    The script prompts for admin credentials and writes the first user to MongoDB. You can also call `POST /auth/admin` directly if you prefer an API-only flow. After the admin exists, use the `/auth/login` endpoint (or UI login page) to obtain a JWT.
 
 5. **(Optional) Seed organizations & users**
+
    - `POST /auth/companies` to create organizations (admin only)
    - `POST /auth/branches` to attach branches to companies
    - `POST /auth/users` to invite additional analysts tied to those branches
-   The `/auth/me` endpoint echoes the authenticated user and organization context; this metadata is logged alongside each generation.
+     The `/auth/me` endpoint echoes the authenticated user and organization context; this metadata is logged alongside each generation.
 
 6. **Run the server**
    ```bash
@@ -186,12 +193,14 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
 ## Frontend Setup (`mcp-ui/`)
 
 1. **Install dependencies**
+
    ```bash
    cd mcp-ui
    npm install
    ```
 
 2. **Configure API base** – create `.env.local` if you need to customise it.
+
    ```env
    NEXT_PUBLIC_API_BASE=http://localhost:3001
    ```
@@ -202,6 +211,7 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
    ```
 
 Visit [http://localhost:3000](http://localhost:3000) and log in with the admin/user credentials you created. The workspace exposes:
+
 - Chat, Query, Tools, Bulk Insert, and History tabs via the left sidebar
 - Model selector (DeepSeek, Gemini, Custom) and toggles for Debug + RAG hints
 - Session list with rename/delete actions and automatic persistence
@@ -217,22 +227,22 @@ Visit [http://localhost:3000](http://localhost:3000) and log in with the admin/u
 
 ## Key API Endpoints
 
-| Method & Path                     | Description                                                                                                                                |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /auth/admin`                | Bootstrap the first admin user (idempotent once an admin exists).                                                                          |
-| `POST /auth/login`                | Username/password login; returns `{ token, user }`.                                                                                        |
-| `GET /auth/me`                    | Returns the authenticated user with company/branch context.                                                                                |
-| `POST /auth/companies`            | Create a company (admin only).                                                                                                             |
-| `POST /auth/branches`             | Create a branch tied to a company (admin only).                                                                                            |
-| `POST /auth/users`                | Invite an additional user (admin only).                                                                                                    |
-| `POST /api/generate`              | Main entry point: accepts `{ prompt, provider?, model?, useToolset?, toolsetName?, useRagHints?, schema? }` and returns SQL/tool output.    |
-| `GET /api/config` / `PUT /api/config` | Fetch or persist runtime configuration; PUT triggers embedding syncs when possible.                                                   |
-| `POST /api/config/embed-sync`     | Manually push the latest schema/toolset snapshots to the embedding service.                                                                |
-| `GET /tools` / `POST /tool`       | List or invoke MCP tools directly via the toolbox.                                                                                         |
-| `GET /prompts` / `POST /prompts`  | Saved prompt library CRUD for the authenticated user.                                                                                      |
-| `GET /sessions` / `POST /sessions` | Manage chat sessions; use `POST /sessions/:id/messages` to append conversation turns.                                                    |
-| `GET /debug/status` / `POST /debug/toggle` | Inspect or flip verbose debug mode.                                                                                             |
-| `GET /retrieval/search`           | Proxy to the embedding service for entity search; query via `?query=...&types=device_name,location&limit=5`.                               |
+| Method & Path                              | Description                                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /auth/admin`                         | Bootstrap the first admin user (idempotent once an admin exists).                                                                        |
+| `POST /auth/login`                         | Username/password login; returns `{ token, user }`.                                                                                      |
+| `GET /auth/me`                             | Returns the authenticated user with company/branch context.                                                                              |
+| `POST /auth/companies`                     | Create a company (admin only).                                                                                                           |
+| `POST /auth/branches`                      | Create a branch tied to a company (admin only).                                                                                          |
+| `POST /auth/users`                         | Invite an additional user (admin only).                                                                                                  |
+| `POST /api/generate`                       | Main entry point: accepts `{ prompt, provider?, model?, useToolset?, toolsetName?, useRagHints?, schema? }` and returns SQL/tool output. |
+| `GET /api/config` / `PUT /api/config`      | Fetch or persist runtime configuration; PUT triggers embedding syncs when possible.                                                      |
+| `POST /api/config/embed-sync`              | Manually push the latest schema/toolset snapshots to the embedding service.                                                              |
+| `GET /tools` / `POST /tool`                | List or invoke MCP tools directly via the toolbox.                                                                                       |
+| `GET /prompts` / `POST /prompts`           | Saved prompt library CRUD for the authenticated user.                                                                                    |
+| `GET /sessions` / `POST /sessions`         | Manage chat sessions; use `POST /sessions/:id/messages` to append conversation turns.                                                    |
+| `GET /debug/status` / `POST /debug/toggle` | Inspect or flip verbose debug mode.                                                                                                      |
+| `GET /retrieval/search`                    | Proxy to the embedding service for entity search; query via `?query=...&types=device_name,location&limit=5`.                             |
 
 ## Observability & Reports
 
@@ -254,3 +264,46 @@ Enable debug mode from the UI header or `/debug/toggle` to stream planner traces
 ## License
 
 Released under the [MIT License](LICENSE). Contributions and feature ideas are welcome—open an issue or submit a pull request.
+
+## Docker (Backend + MongoDB + MySQL)
+
+1. Build and run services:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+2. Environment:
+
+   - The compose file wires sensible defaults. To override secrets (e.g., `DEEPSEEK_API_KEY`, `JWT_SECRET`), export them in your shell before running compose or create a `.env` file in the repo root with those variables.
+   - Backend connects to services by name: `mysql` and `mongo`.
+
+3. Access:
+
+   - Backend API: `http://localhost:3001`
+   - MySQL: `localhost:3306` (user `mcp` / pass `mcp` / db `mcp`)
+   - MongoDB: `localhost:27017`
+
+4. First-time setup inside Docker:
+
+   ```bash
+   # Generate schema snapshot and toolset (optional but recommended)
+   docker compose exec backend npm run schema:mysql
+   docker compose exec backend npm run export:toolset
+
+   # Create initial admin
+   docker compose exec backend node ./scripts/create-admin.js
+   ```
+
+5. Logs:
+
+   ```bash
+   docker compose logs -f backend
+   ```
+
+6. Stop & clean up:
+   ```bash
+   docker compose down
+   # remove volumes if you want a clean state
+   docker compose down -v
+   ```

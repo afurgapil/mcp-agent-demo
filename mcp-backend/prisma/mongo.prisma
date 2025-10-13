@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+  // generate a separate client so it doesn't collide with MySQL one
+  output   = "../node_modules/@prisma/client-mongo"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGO_PRISMA_URL")
+}
+
+/// Mongo models mapped from existing Mongoose schemas
+model User {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  email       String  @unique
+  passwordHash String
+  role        String
+  company     String? @db.ObjectId
+  branch      String? @db.ObjectId
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Session {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  sessionId  String  @unique
+  userId     String? @db.ObjectId
+  title      String?
+  messages   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+}
+
+model Prompt {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  title      String
+  category   String
+  prompt     String
+  sql        String?
+  modelOutput String?
+  user       String  @db.ObjectId
+  company    String? @db.ObjectId
+  branch     String? @db.ObjectId
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([user, createdAt(sort: Desc)])
+  @@index([company, createdAt(sort: Desc)])
+}
+
+model Company {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  name      String  @unique
+  description String?
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Branch {
+  id        String  @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  company   String  @db.ObjectId
+  address   String?
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([company, name])
+}
+
+

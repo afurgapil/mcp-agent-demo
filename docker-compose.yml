@@ -1,0 +1,70 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: mcp
+      MYSQL_USER: mcp
+      MYSQL_PASSWORD: mcp
+    ports:
+      - "3307:3307"
+    # Use native password plugin is default for 8.0, no extra args needed
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  backend:
+    build:
+      context: ./mcp-backend
+      dockerfile: Dockerfile
+    image: mcp-backend:local
+    depends_on:
+      - mongo
+      - mysql
+    environment:
+      # Server
+      NODE_ENV: development
+      PORT: 3001
+      CORS_ORIGIN: http://localhost:3000
+
+      # Prisma/MySQL
+      DATABASE_URL: mysql://mcp:mcp@mysql:3307/mcp
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3307
+      MYSQL_USER: mcp
+      MYSQL_PASSWORD: mcp
+      MYSQL_DATABASE: mcp
+
+      # Mongo (training logs etc.)
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB_NAME: mcp
+      # Prisma Mongo URL (separate from app URI if needed)
+      MONGO_PRISMA_URL: mongodb://mongo:27017/mcp
+
+      # Providers (fill secrets via .env.docker if needed)
+      MCP_TOOLBOX_URL: http://host.docker.internal:5173/sse
+      PROMPT_COMPLETION_PROVIDER: deepseek
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-test-key}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-changemechangeme}
+
+    ports:
+      - "3001:3001"
+    command:
+      ["sh", "-c", "npm run prisma:mongo:push || true; node ./src/app/start.js"]
+
+volumes:
+  mongo-data:
+  mysql-data:
