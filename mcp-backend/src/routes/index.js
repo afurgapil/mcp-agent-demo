@@ -7,6 +7,7 @@ import generateRoutes from "./generate.routes.js";
 import promptsRoutes from "./prompts.routes.js";
 import sessionsRoutes from "./sessions.routes.js";
 import retrievalRoutes from "./retrieval.routes.js";
+import schemaRoutes from "./schema.routes.js";
 
 const router = Router();
 
@@ -18,5 +19,6 @@ router.use(generateRoutes);
 router.use(promptsRoutes);
 router.use(sessionsRoutes);
 router.use(retrievalRoutes);
+router.use(schemaRoutes);
 
 export default router;
