@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ChatMessage } from "../../types/home";
 import { DataTable, DataChart, SavePromptModal } from "..";
 import { createPrompt } from "../../services/api";
@@ -34,6 +34,8 @@ export default function ChatTab({
   messages: ChatMessage[];
 }) {
   const formRef = useRef<HTMLFormElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveDraft, setSaveDraft] = useState<{
     title: string;
@@ -42,13 +44,51 @@ export default function ChatTab({
     sql?: string | null;
     modelOutput?: string | null;
   } | null>(null);
+
+  const isNearBottom = () => {
+    const el = threadRef.current;
+    if (!el) return true;
+    const threshold = 24;
+    return el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
+  };
+
+  const handleScroll = () => {
+    setShowScrollToBottom(!isNearBottom());
+  };
+
+  const scrollToBottom = () => {
+    const el = threadRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    // Recalculate button visibility on mount and when messages change
+    const el = threadRef.current;
+    if (!el) return;
+    const threshold = 24;
+    const nearBottom =
+      el.scrollTop + el.clientHeight >= el.scrollHeight - threshold;
+    setShowScrollToBottom(!nearBottom);
+  }, [messages.length]);
+
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [messages.length]);
+
   return (
-    <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl">
+    <div className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-4 md:p-8 border border-zinc-800/50 shadow-2xl relative">
       <div className="mb-2 text-xs text-zinc-400">Chat</div>
       <style>{`.chat-thread::-webkit-scrollbar{width:8px} .chat-thread::-webkit-scrollbar-track{background:transparent} .chat-thread::-webkit-scrollbar-thumb{background:rgba(100,116,139,0.4);border-radius:9999px} .chat-thread::-webkit-scrollbar-thumb:hover{background:rgba(100,116,139,0.6)}`}</style>
       <div
         className="mb-6 h-[55vh] overflow-y-auto pr-1 chat-thread"
         data-testid="chat-thread"
+        ref={threadRef}
+        onScroll={handleScroll}
       >
         <div className="space-y-3">
           {messages.map((m) => {
@@ -67,6 +107,16 @@ export default function ChatTab({
                         </div>
                       ) : null}
                     </div>
+                    {showScrollToBottom && (
+                      <button
+                        type="button"
+                        aria-label="En alta kaydır"
+                        onClick={scrollToBottom}
+                        className="absolute right-6 bottom-32 z-10 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-600 text-white text-xs shadow-lg hover:bg-blue-500 transition-colors border border-blue-400/40"
+                      >
+                        ↓
+                      </button>
+                    )}
                   </div>
                   <div className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-700/50 border border-blue-500/50 flex items-center justify-center text-[11px]">
                     U
