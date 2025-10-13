@@ -34,4 +34,4 @@ pnpm-debug.log*
 
 
 mcp-backend/config.json
-mcp-backend/reports/*
+mcp-backend/reports/**
