@@ -1,15 +1,7 @@
 import { extractSqlFromText } from "./sql-extractor.js";
+import { env } from "../utils/env.js";
 
-const {
-  DEEPSEEK_API_KEY,
-  DEEPSEEK_API_BASE = "https://api.deepseek.com",
-  DEEPSEEK_MODEL = "deepseek-chat",
-} = process.env;
-
-if (!DEEPSEEK_API_KEY) {
-  console.error("DEEPSEEK_API_KEY is required in .env");
-  process.exit(1);
-}
+const { DEEPSEEK_API_KEY, DEEPSEEK_API_BASE, DEEPSEEK_MODEL } = env;
 
 function buildUserMessage(userPrompt, schema) {
   if (schema && schema.trim()) {

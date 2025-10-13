@@ -1,5 +1,7 @@
 import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
+import { execFile } from "child_process";
+import mysql from "mysql2/promise";
 import { fileURLToPath } from "url";
 import { callTool, listTools } from "../services/mcp.service.js";
 
@@ -8,6 +10,8 @@ const __dirname = dirname(__filename);
 const ROOT_DIR = join(__dirname, "../../");
 
 const SCHEMA_SUMMARY_FILE = join(ROOT_DIR, "reports/schema.summary.json");
+const SCHEMA_BUNDLE_FILE = join(ROOT_DIR, "reports/schema.bundle.txt");
+const PRISMA_SCHEMA_FILE = join(ROOT_DIR, "prisma/schema.prisma");
 
 const AUTO_SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedAutoSchema = "";
@@ -22,6 +26,108 @@ export function tryLoadSchemaSummary() {
   } catch {
     return null;
   }
+}
+
+function runExportBundle() {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      process.platform === "win32" ? "node.exe" : "node",
+      ["./scripts/export-prisma-schema.js"],
+      { cwd: ROOT_DIR, env: process.env },
+      (err) => {
+        if (err) return reject(err);
+        resolve();
+      }
+    );
+  });
+}
+
+async function runPrismaDbPullInProcess() {
+  return new Promise((resolvePromise, reject) => {
+    const cmd = process.platform === "win32" ? "npx.cmd" : "npx";
+    execFile(
+      cmd,
+      ["prisma", "db", "pull"],
+      { cwd: ROOT_DIR, env: process.env },
+      (err) => {
+        if (err) return reject(err);
+        resolvePromise();
+      }
+    );
+  });
+}
+
+async function fetchViewsSqlFromMySql() {
+  const { MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE } =
+    process.env;
+  if (!MYSQL_USER || !MYSQL_DATABASE)
+    return "-- No MySQL credentials; skipping views";
+  const conn = await mysql.createConnection({
+    host: MYSQL_HOST || "localhost",
+    port: Number(MYSQL_PORT) || 3306,
+    user: MYSQL_USER,
+    password: MYSQL_PASSWORD,
+    database: MYSQL_DATABASE,
+  });
+  try {
+    const [rows] = await conn.execute(
+      `SELECT TABLE_SCHEMA, TABLE_NAME, VIEW_DEFINITION
+       FROM information_schema.VIEWS
+       WHERE TABLE_SCHEMA = ?
+       ORDER BY TABLE_NAME`,
+      [MYSQL_DATABASE]
+    );
+    if (!rows.length) return "-- No views found";
+    return rows
+      .map((r) => {
+        const name = `\`${r.TABLE_SCHEMA}\`.\`${r.TABLE_NAME}\``;
+        return `DROP VIEW IF EXISTS ${name};\nCREATE OR REPLACE VIEW ${name} AS\n${r.VIEW_DEFINITION};`;
+      })
+      .join("\n\n");
+  } finally {
+    await conn.end();
+  }
+}
+
+export async function buildSchemaBundle({ introspect = false } = {}) {
+  try {
+    if (introspect) {
+      await runPrismaDbPullInProcess();
+    }
+  } catch (err) {
+    console.warn("Prisma introspection failed:", err?.message || err);
+  }
+
+  let prismaSchema = "";
+  try {
+    if (existsSync(PRISMA_SCHEMA_FILE)) {
+      prismaSchema = readFileSync(PRISMA_SCHEMA_FILE, "utf8");
+    }
+  } catch {}
+
+  let viewsSql = "";
+  try {
+    viewsSql = await fetchViewsSqlFromMySql();
+  } catch (err) {
+    viewsSql = `-- Failed to fetch views: ${err?.message || err}`;
+  }
+
+  const bundle = [
+    "# Prisma schema snapshot\n",
+    "```prisma\n",
+    prismaSchema || "// empty",
+    "\n```\n\n",
+    "# MySQL views (generated)\n",
+    "```sql\n",
+    viewsSql || "-- empty",
+    "\n```\n",
+  ].join("");
+  return bundle;
+}
+
+export async function getFreshSchemaBundle() {
+  // Build in-process; avoid writing files to prevent nodemon restarts
+  return buildSchemaBundle({ introspect: true });
 }
 
 function csvEscape(value) {
@@ -266,5 +372,26 @@ export async function getAutoSchemaFromCache() {
     cachedAutoSchemaTimestamp = now;
     return { schema: cachedAutoSchema, source: "fetched" };
   }
+  return { schema: "", source: "none" };
+}
+
+// Simple, robust schema getter: no writes, no introspection, no cache
+export function getSchemaForPromptSimple() {
+  try {
+    // Prefer prisma schema if exists
+    if (existsSync(PRISMA_SCHEMA_FILE)) {
+      const text = readFileSync(PRISMA_SCHEMA_FILE, "utf8").trim();
+      if (text) {
+        return { schema: text, source: "prisma-file" };
+      }
+    }
+    // Fallback to summary file (JSON string content)
+    if (existsSync(SCHEMA_SUMMARY_FILE)) {
+      const text = readFileSync(SCHEMA_SUMMARY_FILE, "utf8").trim();
+      if (text) {
+        return { schema: text, source: "file" };
+      }
+    }
+  } catch {}
   return { schema: "", source: "none" };
 }

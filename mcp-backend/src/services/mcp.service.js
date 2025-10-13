@@ -1,6 +1,38 @@
 import { URL } from "url";
+import { env } from "../utils/env.js";
 
-const MCP_BASE = (process.env.MCP_TOOLBOX_URL || "").trim().replace(/\/$/, "");
+const MCP_BASE_RAW = (env.MCP_TOOLBOX_URL || "").trim();
+const MCP_SSE_PATH = (env.MCP_SSE_PATH || "").trim();
+
+function splitBaseAndPath(raw) {
+  try {
+    if (!raw) return { origin: "", path: "" };
+    const u = new URL(raw);
+    return { origin: `${u.protocol}//${u.host}`, path: u.pathname || "" };
+  } catch {
+    return { origin: "", path: "" };
+  }
+}
+
+const { origin: MCP_ORIGIN, path: MCP_PATH_IN_BASE } =
+  splitBaseAndPath(MCP_BASE_RAW);
+const MCP_BASE = MCP_ORIGIN.replace(/\/$/, "");
+
+function buildSseCandidates() {
+  const explicitFromEnv =
+    MCP_SSE_PATH && MCP_SSE_PATH.startsWith("/") ? MCP_SSE_PATH : null;
+  const explicitFromBase =
+    MCP_PATH_IN_BASE && MCP_PATH_IN_BASE !== "/" ? MCP_PATH_IN_BASE : null;
+  const candidates = [
+    explicitFromBase,
+    explicitFromEnv,
+    "/mcp/sse",
+    "/sse",
+    "/mcp",
+    "/events",
+  ].filter(Boolean);
+  return candidates;
+}
 
 let mcpClientPromise = null;
 
@@ -14,12 +46,16 @@ export async function getMcpClient() {
       const { Client } = await import(
         "@modelcontextprotocol/sdk/client/index.js"
       );
-      const candidates = [
-        process.env.MCP_SSE_PATH || "/sse",
-        "/mcp/sse",
-        "/mcp",
-        "/events",
-      ];
+      try {
+        const masked = MCP_BASE.replace(
+          /(https?:\/\/[^:]+:)([^@]+)(@)/,
+          "$1***$3"
+        );
+        console.log("[MCP] Base:", masked || "<empty>");
+        console.log("[MCP] Base Path:", MCP_PATH_IN_BASE || "<none>");
+        console.log("[MCP] SSE Path:", MCP_SSE_PATH || "<unspecified>");
+      } catch {}
+      const candidates = buildSseCandidates();
       let lastErr;
       for (const path of candidates) {
         try {

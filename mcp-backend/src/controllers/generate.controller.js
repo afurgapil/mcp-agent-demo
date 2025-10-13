@@ -6,15 +6,18 @@ import {
   tryLoadSchemaSummary,
   getAutoSchemaFromCache,
   updateUsageCsv,
+  getFreshSchemaBundle,
+  getSchemaForPromptSimple,
 } from "../services/schema.service.js";
 import { callTool, listTools } from "../services/mcp.service.js";
 import { planToolUsage } from "../services/toolset.service.js";
 import { searchEntities as retrievalSearchEntities } from "../services/retrieval.service.js";
 import { getIsDebugMode } from "./debug.controller.js";
 import { logTrainingExample } from "../services/training-log.service.js";
+import { env } from "../utils/env.js";
 
 // Base system prompt used for SQL generation; can be overridden via env
-const systemPromptBase = process.env.SYSTEM_PROMPT_BASE || "";
+const systemPromptBase = env.SYSTEM_PROMPT_BASE;
 
 function valueToId(value, seen = new WeakSet()) {
   if (!value) return null;
@@ -121,25 +124,51 @@ export async function generateHandler(req, res) {
     schemaToUse = customSchema.trim();
     schemaSource = "custom";
   } else {
-    const fileSchema = tryLoadSchemaSummary();
-    if (fileSchema) {
-      schemaToUse = fileSchema;
-      schemaSource = "file";
+    // Minimal, deterministic: prefer prisma schema, else summary; no cache, no writes
+    const simple = getSchemaForPromptSimple();
+    if (simple.schema && simple.schema.trim()) {
+      schemaToUse = simple.schema.trim();
+      schemaSource = simple.source || "file";
     } else {
-      const autoSchema = await getAutoSchemaFromCache();
-      if (autoSchema.schema && autoSchema.schema.trim()) {
-        schemaToUse = autoSchema.schema.trim();
-        schemaSource = autoSchema.source || "fetched";
-        if (schemaSource === "fetched") {
-          try {
-          } catch (persistErr) {
-            console.warn(
-              `Failed to persist fetched schema: ${persistErr.message}`
-            );
-          }
+      const summary = tryLoadSchemaSummary();
+      if (summary && summary.trim()) {
+        schemaToUse = summary.trim();
+        schemaSource = "summary-file";
+      } else {
+        const autoSchema = await getAutoSchemaFromCache();
+        if (autoSchema.schema && autoSchema.schema.trim()) {
+          schemaToUse = autoSchema.schema.trim();
+          schemaSource = autoSchema.source || "fetched";
         }
       }
     }
+  }
+
+  if (!schemaToUse.trim()) {
+    try {
+      const bundle = await getFreshSchemaBundle();
+      if (bundle && bundle.trim()) {
+        schemaToUse = bundle.trim();
+        schemaSource = "bundle-fresh";
+      }
+    } catch (err) {
+      console.warn(`Failed to build fresh schema bundle: ${err.message}`);
+    }
+  }
+
+  if (schemaToUse.trim()) {
+    try {
+      console.info(
+        `[generate] Schema resolved`,
+        JSON.stringify({ source: schemaSource, length: schemaToUse.length })
+      );
+    } catch {}
+  } else {
+    schemaToUse = "-- Schema unavailable";
+    schemaSource = "unavailable";
+    try {
+      console.warn("[generate] Schema unresolved; using placeholder.");
+    } catch {}
   }
 
   const startTime = Date.now();
@@ -156,7 +185,7 @@ export async function generateHandler(req, res) {
     typeof body.toolsetName === "string" && body.toolsetName.trim()
       ? body.toolsetName.trim()
       : null;
-  const customApiBase = process.env.CUSTOM_API_BASE || "";
+  const customApiBase = env.CUSTOM_API_BASE;
 
   let executionStrategy = "sql";
   let toolCallInfo = null;
@@ -171,12 +200,12 @@ export async function generateHandler(req, res) {
         return requestedModel.trim();
       }
       if (useProvider === "gemini") {
-        return process.env.GEMINI_MODEL || null;
+        return env.GEMINI_MODEL || null;
       }
       if (useProvider === "custom") {
         return undefined;
       }
-      return process.env.DEEPSEEK_MODEL || undefined;
+      return env.DEEPSEEK_MODEL || undefined;
     })();
 
     if (toolsetEnabled) {
@@ -380,7 +409,7 @@ export async function generateHandler(req, res) {
     const useRagHints =
       typeof body.useRagHints === "boolean"
         ? body.useRagHints
-        : String(process.env.USE_RAG_HINTS || "false").toLowerCase() === "true";
+        : env.USE_RAG_HINTS;
     if (useRagHints) {
       try {
         let filterHints = [];
