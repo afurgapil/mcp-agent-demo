@@ -7,6 +7,8 @@ export default function HomeHeader({
   onToggleDebug,
   useRagHints,
   onToggleRagHints,
+  useToolset,
+  onToggleToolset,
 
   companyName,
   branchName,
@@ -17,6 +19,8 @@ export default function HomeHeader({
   onToggleDebug: () => void;
   useRagHints: boolean;
   onToggleRagHints: () => void;
+  useToolset: boolean;
+  onToggleToolset: () => void;
   activeTab: "chat" | "query" | "tools" | "history" | "insert";
   onTabChange: (tab: "chat" | "query" | "tools" | "history" | "insert") => void;
   companyName?: string | null;
@@ -51,6 +55,17 @@ export default function HomeHeader({
             title="Toggle RAG hints in SQL generation"
           >
             RAG Hints: {useRagHints ? "On" : "Off"}
+          </button>
+          <button
+            onClick={onToggleToolset}
+            className={`px-3 py-2 rounded-lg text-sm border transition ${
+              useToolset
+                ? "bg-indigo-500/10 text-indigo-200 border-indigo-500/30"
+                : "bg-zinc-900/50 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:bg-zinc-900/70"
+            }`}
+            title="Toggle Toolset planner usage"
+          >
+            Toolset: {useToolset ? "On" : "Off"}
           </button>
           {(companyName || branchName) && (
             <div className="text-xs px-3 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50 text-zinc-300">

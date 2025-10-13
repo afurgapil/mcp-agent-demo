@@ -468,6 +468,8 @@ export default function Home() {
           onToggleDebug={toggleDebugMode}
           useRagHints={useRagHints}
           onToggleRagHints={() => setUseRagHints((v) => !v)}
+          useToolset={useToolset}
+          onToggleToolset={() => setUseToolset((v) => !v)}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           companyName={me?.company?.name || null}

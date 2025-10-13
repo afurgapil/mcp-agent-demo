@@ -13,6 +13,9 @@ import { searchEntities as retrievalSearchEntities } from "../services/retrieval
 import { getIsDebugMode } from "./debug.controller.js";
 import { logTrainingExample } from "../services/training-log.service.js";
 
+// Base system prompt used for SQL generation; can be overridden via env
+const systemPromptBase = process.env.SYSTEM_PROMPT_BASE || "";
+
 function valueToId(value, seen = new WeakSet()) {
   if (!value) return null;
   if (typeof value === "string") return value;

@@ -1,5 +1,7 @@
 import { sendJSON } from "../utils/response.js";
 
+let debugMode = false;
+
 export function getDebugStatus(req, res) {
   return sendJSON(res, 200, {
     debugMode: getIsDebugMode(),
@@ -8,14 +10,14 @@ export function getDebugStatus(req, res) {
 }
 
 export function toggleDebug(req, res) {
-  const isDebugMode = !getIsDebugMode();
-  console.log(`🔧 Debug mode ${getIsDebugMode() ? "ENABLED" : "DISABLED"}`);
+  debugMode = !debugMode;
+  console.log(`🔧 Debug mode ${debugMode ? "ENABLED" : "DISABLED"}`);
   return sendJSON(res, 200, {
-    debugMode: getIsDebugMode(),
-    message: `Debug mode ${getIsDebugMode() ? "enabled" : "disabled"}`,
+    debugMode: debugMode,
+    message: `Debug mode ${debugMode ? "enabled" : "disabled"}`,
   });
 }
 
 export function getIsDebugMode() {
-  return isDebugMode || false;
+  return !!debugMode;
 }
