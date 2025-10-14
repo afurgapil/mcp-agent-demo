@@ -188,7 +188,7 @@ export async function planToolUsage({
   const filtered = availableTools.filter((tool) => {
     if (!tool || typeof tool.name !== "string") return false;
     const name = tool.name.toLowerCase();
-    return name !== "mysql_execute_sql";
+    return name !== "postgres_execute_sql"; // exclude raw execution tool from planner ranking
   });
 
   if (filtered.length === 0) {

@@ -3,14 +3,14 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model customers {
   customer_id Int       @id @default(autoincrement())
   name        String    @db.VarChar(100)
-  email       String?   @unique(map: "email") @db.VarChar(150)
+  email       String?   @unique(map: "customers_email_unique") @db.VarChar(150)
   phone       String?   @db.VarChar(20)
   address     String?   @db.Text
   created_at  DateTime? @default(now()) @db.Timestamp(0)
@@ -25,8 +25,8 @@ model device_permissions {
   users         users    @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "device_permissions_ibfk_1")
   devices       devices  @relation(fields: [device_id], references: [device_id], onDelete: Cascade, onUpdate: NoAction, map: "device_permissions_ibfk_2")
 
-  @@index([device_id], map: "device_id")
-  @@index([user_id], map: "user_id")
+  @@index([device_id], map: "device_permissions_device_id_idx")
+  @@index([user_id], map: "device_permissions_user_id_idx")
 }
 
 model devices {
@@ -69,13 +69,13 @@ model signals {
   signal_logs signal_logs[]
   devices     devices             @relation(fields: [device_id], references: [device_id], onDelete: Cascade, onUpdate: NoAction, map: "signals_ibfk_1")
 
-  @@index([device_id], map: "device_id")
+  @@index([device_id], map: "signals_device_id_idx")
 }
 
 model users {
   user_id            Int                  @id @default(autoincrement())
-  username           String               @unique(map: "username") @db.VarChar(100)
-  email              String               @unique(map: "email") @db.VarChar(150)
+  username           String               @unique(map: "users_username_unique") @db.VarChar(100)
+  email              String               @unique(map: "users_email_unique") @db.VarChar(150)
   role               users_role?          @default(viewer)
   created_at         DateTime?            @default(now()) @db.Timestamp(0)
   device_permissions device_permissions[]

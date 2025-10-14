@@ -91,7 +91,7 @@ function buildRequesterMetadata(req) {
 
 async function executeSqlThroughMcp(sql) {
   const startedAt = Date.now();
-  const result = await callTool("mysql_execute_sql", { sql });
+  const result = await callTool("postgres_execute_sql", { sql });
   const durationMs = Date.now() - startedAt;
   return { result, durationMs };
 }

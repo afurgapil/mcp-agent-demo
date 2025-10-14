@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  // generate a separate client so it doesn't collide with MySQL one
   output   = "../node_modules/@prisma/client-mongo"
 }
 

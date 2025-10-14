@@ -57,19 +57,24 @@ export async function getMcpClient() {
       } catch {}
       const candidates = buildSseCandidates();
       let lastErr;
-      for (const path of candidates) {
-        try {
-          const sseUrl = new URL(path, MCP_BASE + "/");
-          const transport = new SSEClientTransport(sseUrl);
-          const client = new Client({
-            name: "mcp-agent-backend",
-            version: "0.3.0",
-          });
-          await client.connect(transport);
-          return client;
-        } catch (err) {
-          lastErr = err;
+      const attempts = Number(process.env.MCP_CONNECT_RETRIES || 12);
+      const delayMs = Number(process.env.MCP_CONNECT_DELAY_MS || 2500);
+      for (let i = 0; i < attempts; i++) {
+        for (const path of candidates) {
+          try {
+            const sseUrl = new URL(path, MCP_BASE + "/");
+            const transport = new SSEClientTransport(sseUrl);
+            const client = new Client({
+              name: "mcp-agent-backend",
+              version: "0.3.0",
+            });
+            await client.connect(transport);
+            return client;
+          } catch (err) {
+            lastErr = err;
+          }
         }
+        await new Promise((r) => setTimeout(r, delayMs));
       }
       throw lastErr || new Error("No SSE endpoint candidates worked");
     } catch (err) {

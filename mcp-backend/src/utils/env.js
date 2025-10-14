@@ -10,13 +10,13 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   CORS_ORIGIN: z.string().optional().default(""),
 
-  // Prisma/MySQL
+  // Prisma/PostgreSQL
   DATABASE_URL: z.string().optional().default(""),
-  MYSQL_HOST: z.string().optional().default("localhost"),
-  MYSQL_PORT: z.coerce.number().int().positive().optional().default(3306),
-  MYSQL_USER: z.string().optional().default(""),
-  MYSQL_PASSWORD: z.string().optional().default(""),
-  MYSQL_DATABASE: z.string().optional().default(""),
+  POSTGRES_HOST: z.string().optional().default("localhost"),
+  POSTGRES_PORT: z.coerce.number().int().positive().optional().default(5432),
+  POSTGRES_USER: z.string().optional().default(""),
+  POSTGRES_PASSWORD: z.string().optional().default(""),
+  POSTGRES_DB: z.string().optional().default(""),
 
   // Providers
   SYSTEM_PROMPT_BASE: z.string().optional().default(""),
@@ -64,10 +64,10 @@ export function loadEnv() {
   }
 
   const hasDatabaseUrl = !!(c.DATABASE_URL && c.DATABASE_URL.trim());
-  const hasMysql = !!(c.MYSQL_HOST && c.MYSQL_USER && c.MYSQL_DATABASE);
-  if (!hasDatabaseUrl && !hasMysql) {
+  const hasPostgres = !!(c.POSTGRES_HOST && c.POSTGRES_USER && c.POSTGRES_DB);
+  if (!hasDatabaseUrl && !hasPostgres) {
     throw new Error(
-      "Provide DATABASE_URL or MYSQL_HOST/MYSQL_USER/MYSQL_DATABASE"
+      "Provide DATABASE_URL or POSTGRES_HOST/POSTGRES_USER/POSTGRES_DB"
     );
   }
 

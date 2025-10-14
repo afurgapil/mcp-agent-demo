@@ -1,7 +1,8 @@
 import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { execFile } from "child_process";
-import mysql from "mysql2/promise";
+// Switched from MySQL to PostgreSQL
+import { Client as PgClient } from "pg";
 import { fileURLToPath } from "url";
 import { callTool, listTools } from "../services/mcp.service.js";
 
@@ -57,35 +58,41 @@ async function runPrismaDbPullInProcess() {
   });
 }
 
-async function fetchViewsSqlFromMySql() {
-  const { MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE } =
-    process.env;
-  if (!MYSQL_USER || !MYSQL_DATABASE)
-    return "-- No MySQL credentials; skipping views";
-  const conn = await mysql.createConnection({
-    host: MYSQL_HOST || "localhost",
-    port: Number(MYSQL_PORT) || 3306,
-    user: MYSQL_USER,
-    password: MYSQL_PASSWORD,
-    database: MYSQL_DATABASE,
+async function fetchViewsSqlFromPostgres() {
+  const {
+    PGHOST = process.env.POSTGRES_HOST,
+    PGPORT = process.env.POSTGRES_PORT,
+    PGUSER = process.env.POSTGRES_USER,
+    PGPASSWORD = process.env.POSTGRES_PASSWORD,
+    PGDATABASE = process.env.POSTGRES_DB,
+  } = process.env;
+  if (!PGUSER || !PGDATABASE)
+    return "-- No Postgres credentials; skipping views";
+  const client = new PgClient({
+    host: PGHOST || "localhost",
+    port: Number(PGPORT) || 5432,
+    user: PGUSER,
+    password: PGPASSWORD,
+    database: PGDATABASE,
   });
+  await client.connect();
   try {
-    const [rows] = await conn.execute(
-      `SELECT TABLE_SCHEMA, TABLE_NAME, VIEW_DEFINITION
-       FROM information_schema.VIEWS
-       WHERE TABLE_SCHEMA = ?
-       ORDER BY TABLE_NAME`,
-      [MYSQL_DATABASE]
+    const result = await client.query(
+      `SELECT schemaname AS table_schema, viewname AS table_name, definition AS view_definition
+       FROM pg_views
+       WHERE schemaname NOT IN ('pg_catalog','information_schema')
+       ORDER BY schemaname, viewname`
     );
+    const rows = result.rows || [];
     if (!rows.length) return "-- No views found";
     return rows
       .map((r) => {
-        const name = `\`${r.TABLE_SCHEMA}\`.\`${r.TABLE_NAME}\``;
-        return `DROP VIEW IF EXISTS ${name};\nCREATE OR REPLACE VIEW ${name} AS\n${r.VIEW_DEFINITION};`;
+        const qualified = `"${r.table_schema}"."${r.table_name}"`;
+        return `DROP VIEW IF EXISTS ${qualified} CASCADE;\nCREATE OR REPLACE VIEW ${qualified} AS\n${r.view_definition};`;
       })
       .join("\n\n");
   } finally {
-    await conn.end();
+    await client.end();
   }
 }
 
@@ -107,7 +114,7 @@ export async function buildSchemaBundle({ introspect = false } = {}) {
 
   let viewsSql = "";
   try {
-    viewsSql = await fetchViewsSqlFromMySql();
+    viewsSql = await fetchViewsSqlFromPostgres();
   } catch (err) {
     viewsSql = `-- Failed to fetch views: ${err?.message || err}`;
   }
@@ -117,7 +124,7 @@ export async function buildSchemaBundle({ introspect = false } = {}) {
     "```prisma\n",
     prismaSchema || "// empty",
     "\n```\n\n",
-    "# MySQL views (generated)\n",
+    "# Postgres views (generated)\n",
     "```sql\n",
     viewsSql || "-- empty",
     "\n```\n",
@@ -300,22 +307,22 @@ function parseTablesFromResult(result) {
 }
 
 async function fetchCreateStatementForTable(table, toolNames) {
-  if (toolNames.has("mysql_show_create_table")) {
+  if (toolNames.has("postgres_show_create_table")) {
     try {
-      const createRes = await callTool("mysql_show_create_table", { table });
+      const createRes = await callTool("postgres_show_create_table", { table });
       const createText = extractTextFromToolResult(createRes);
       if (createText) {
         return createText.trim();
       }
     } catch (err) {
       console.warn(
-        `mysql_show_create_table failed for ${table}: ${err.message}`
+        `postgres_show_create_table failed for ${table}: ${err.message}`
       );
     }
   }
-  if (toolNames.has("mysql_describe_table")) {
+  if (toolNames.has("postgres_describe_table")) {
     try {
-      const describeRes = await callTool("mysql_describe_table", { table });
+      const describeRes = await callTool("postgres_describe_table", { table });
       const describeText =
         rowsToTable(describeRes?.rows) ||
         extractTextFromToolResult(describeRes);
@@ -323,7 +330,9 @@ async function fetchCreateStatementForTable(table, toolNames) {
         return describeText.trim();
       }
     } catch (err) {
-      console.warn(`mysql_describe_table failed for ${table}: ${err.message}`);
+      console.warn(
+        `postgres_describe_table failed for ${table}: ${err.message}`
+      );
     }
   }
   return "(schema unavailable)";
@@ -333,16 +342,16 @@ export async function fetchSchemaFromMcp({ maxTables = 25 } = {}) {
   try {
     const tools = await listTools();
     const toolNames = new Set(tools.map((tool) => tool.name));
-    if (!toolNames.has("mysql_show_tables")) {
+    if (!toolNames.has("postgres_show_tables")) {
       console.warn(
-        "mysql_show_tables tool not available; cannot auto-fetch schema"
+        "postgres_show_tables tool not available; cannot auto-fetch schema"
       );
       return "";
     }
-    const tablesResult = await callTool("mysql_show_tables", {});
+    const tablesResult = await callTool("postgres_show_tables", {});
     const tables = parseTablesFromResult(tablesResult);
     if (!tables.length) {
-      console.warn("mysql_show_tables did not return any tables");
+      console.warn("postgres_show_tables did not return any tables");
       return "";
     }
     const limitedTables = tables.slice(0, maxTables);

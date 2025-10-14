@@ -13,7 +13,7 @@ function hasTool(tools, name) {
 }
 
 async function runQuery(sql) {
-  const result = await callTool("mysql_execute_sql", { sql });
+  const result = await callTool("postgres_execute_sql", { sql });
   // Expecting structured data from MCP; try to normalize
   const content = result?.content ?? result;
   if (Array.isArray(content)) return content;
@@ -51,7 +51,7 @@ function toEntities({ locations, deviceTypes, deviceNames }) {
       id: `loc_${i++}_${name}`,
       type: "location",
       text: name,
-      metadata: { source: "mysql", table: "locations", column: "name" },
+      metadata: { source: "postgres", table: "locations", column: "name" },
     });
   }
   i = 0;
@@ -60,7 +60,7 @@ function toEntities({ locations, deviceTypes, deviceNames }) {
       id: `dtype_${i++}_${typ}`,
       type: "device_type",
       text: typ,
-      metadata: { source: "mysql", table: "devices", column: "type" },
+      metadata: { source: "postgres", table: "devices", column: "type" },
     });
   }
   i = 0;
@@ -69,7 +69,7 @@ function toEntities({ locations, deviceTypes, deviceNames }) {
       id: `dname_${i++}_${dn}`,
       type: "device_name",
       text: dn,
-      metadata: { source: "mysql", table: "devices", column: "name" },
+      metadata: { source: "postgres", table: "devices", column: "name" },
     });
   }
   return entities;
@@ -104,8 +104,8 @@ async function main() {
   }
 
   const tools = await listTools();
-  if (!hasTool(tools, "mysql_execute_sql")) {
-    throw new Error("mysql_execute_sql tool is not available via MCP");
+  if (!hasTool(tools, "postgres_execute_sql")) {
+    throw new Error("postgres_execute_sql tool is not available via MCP");
   }
 
   // Build queries based on schema (fallbacks included)

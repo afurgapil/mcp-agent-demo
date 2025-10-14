@@ -137,11 +137,11 @@ export default function SavedPrompts() {
       }
       let result: unknown = null;
       try {
-        const exec = await callTool("mysql_execute_sql", { sql: p.sql });
+        const exec = await callTool("postgres_execute_sql", { sql: p.sql });
         result = exec?.result ?? null;
       } catch {
-        // Fallback to mysql_execute if execute_sql is unavailable
-        const exec = await callTool("mysql_execute", { sql: p.sql });
+        // Fallback to old name if toolbox hasn't been updated yet
+        const exec = await callTool("postgres_execute", { sql: p.sql });
         result = exec?.result ?? null;
       }
       setResultModalTitle(p.title);

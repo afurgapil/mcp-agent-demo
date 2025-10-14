@@ -7,8 +7,8 @@ WORKDIR /usr/src/app
 # A wildcard is used to ensure both package.json AND package-lock.json are copied
 COPY package*.json ./
 
-# Install dependencies (include dev to allow prisma generate)
-RUN npm ci
+# Install dependencies (include dev to allow prisma generate). Use install instead of ci because lockfile is updated later.
+RUN npm install
 
 # Bundle app source
 COPY . .

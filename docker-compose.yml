@@ -31,15 +31,19 @@ services:
       dockerfile: Dockerfile
     image: mcp-backend:local
     depends_on:
-      - mongo
-      - postgres # MySQL'den Postgres'e güncellendi
+      mongo:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      toolbox:
+        condition: service_started
     environment:
-      # .env dosyanızdaki DATABASE_URL'i de postgres'e göre güncellemeniz gerekecek
-      # Örnek: DATABASE_URL="postgresql://mcp:mcp@postgres:5432/mcp"
       NODE_ENV: development
       PORT: 3001
       CORS_ORIGIN: http://localhost:3000
-      # ...diğer environment değişkenleriniz...
+      DATABASE_URL: "postgresql://mcp:mcp@postgres:5432/mcp"
+      MCP_TOOLBOX_URL: "http://toolbox:5173/.well-known/mcp/toolbox/sse"
+      MCP_SSE_PATH: "/.well-known/mcp/toolbox/sse"
     ports:
       - "3001:3001"
     command:
@@ -66,11 +70,19 @@ services:
     volumes:
       - ./config:/config:ro
     command:
-      ["toolbox", "--tools-file", "/config/tools.yaml", "--address", "0.0.0.0"]
+      [
+        "toolbox",
+        "--tools-file",
+        "/config/tools.yaml",
+        "--address",
+        "0.0.0.0",
+        "--port",
+        "5173",
+      ]
     depends_on:
       postgres:
         condition: service_healthy
 
 volumes:
   mongo-data:
-  postgres-data: # mysql-data yerine postgres-data
+  postgres-data:

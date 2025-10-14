@@ -670,7 +670,10 @@ export default function Home() {
                 fetchTables={async () => {
                   try {
                     // Ensure the tool exists and call it
-                    const result = await executeTool("mysql_show_tables", {});
+                    const result = await executeTool(
+                      "postgres_show_tables",
+                      {}
+                    );
                     function isRecord(
                       val: unknown
                     ): val is Record<string, unknown> {
@@ -724,13 +727,28 @@ export default function Home() {
                     );
                     return unique;
                   } catch {
+                    // Fallback: query information_schema directly via execute_sql
+                    try {
+                      const res = await executeTool("postgres_execute_sql", {
+                        sql: "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
+                      });
+                      const rows = res?.rows;
+                      if (Array.isArray(rows)) {
+                        const names: string[] = [];
+                        for (const r of rows) {
+                          const v = r?.table_name ?? Object.values(r || {})[0];
+                          if (typeof v === "string" && v) names.push(v);
+                        }
+                        return Array.from(new Set(names));
+                      }
+                    } catch {}
                     return [];
                   }
                 }}
                 describeTable={async (table: string) => {
                   try {
-                    const res = await executeTool("mysql_describe_table", {
-                      tableName: table,
+                    const res = await executeTool("postgres_describe_table", {
+                      table: table,
                     });
                     function isRecord(
                       val: unknown
@@ -821,7 +839,7 @@ export default function Home() {
                   }
                 }}
                 executeSql={async (sql: string) => {
-                  return await executeTool("mysql_execute_sql", { sql });
+                  return await executeTool("postgres_execute_sql", { sql });
                 }}
               />
             )}
