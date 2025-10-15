@@ -3,10 +3,16 @@
 <div align="center">
   <h3>AI-powered MCP workspace with authentication, conversational SQL, and retrieval-aware planning</h3>
 
-<a href="https://nextjs.org/" target="_blank"><img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js" /></a>
-<a href="https://www.typescriptlang.org/" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript" /></a>
-<a href="https://nodejs.org/" target="_blank"><img alt="Node.js" src="https://img.shields.io/badge/Node.js-18-green?style=for-the-badge&logo=node.js" /></a>
-<a href="https://modelcontextprotocol.io/" target="_blank"><img alt="MCP" src="https://img.shields.io/badge/MCP-Protocol-purple?style=for-the-badge" /></a>
+<a href="https://nextjs.org/" target="_blank"><img alt="Next.js" src="https://img.shields.io/badge/Next.js-15.5-black?style=for-the-badge&logo=next.js" /></a>
+<a href="https://react.dev/" target="_blank"><img alt="React" src="https://img.shields.io/badge/React-19.1-61DAFB?style=for-the-badge&logo=react&logoColor=222222" /></a>
+<a href="https://www.typescriptlang.org/" target="_blank"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" /></a>
+<a href="https://tailwindcss.com/" target="_blank"><img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-4.1-38BDF8?style=for-the-badge&logo=tailwindcss&logoColor=white" /></a>
+<a href="https://nodejs.org/" target="_blank"><img alt="Node.js" src="https://img.shields.io/badge/Node.js-20-339933?style=for-the-badge&logo=node.js&logoColor=white" /></a>
+<a href="https://expressjs.com/" target="_blank"><img alt="Express" src="https://img.shields.io/badge/Express-5.1-000000?style=for-the-badge&logo=express&logoColor=white" /></a>
+<a href="https://www.prisma.io/" target="_blank"><img alt="Prisma" src="https://img.shields.io/badge/Prisma-6.17-2D3748?style=for-the-badge&logo=prisma&logoColor=white" /></a>
+<a href="https://www.postgresql.org/" target="_blank"><img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-15-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" /></a>
+<a href="https://www.mongodb.com/" target="_blank"><img alt="MongoDB" src="https://img.shields.io/badge/MongoDB-7-47A248?style=for-the-badge&logo=mongodb&logoColor=white" /></a>
+<a href="https://modelcontextprotocol.io/" target="_blank"><img alt="MCP" src="https://img.shields.io/badge/MCP-Protocol-7F56D9?style=for-the-badge" /></a>
 
 </div>
 
@@ -34,7 +40,7 @@ sequenceDiagram
     participant Embed as Embedding / Retrieval Service (FastAPI)
     participant LLM as SQL Model (Deepseek/Gemini/Custom)
     participant MCP as MCP Toolbox
-    participant DB as Target MySQL
+    participant DB as Target PostgreSQL
     participant Mongo as Training Logs (MongoDB)
 
     User->>UI: Login (JWT stored in browser)
@@ -55,14 +61,14 @@ sequenceDiagram
             MCP-->>BE: Tool result
         else Planner falls back
             BE->>LLM: Generate SQL (with entity hints)
-            BE->>MCP: mysql_execute_sql
+            BE->>MCP: postgres_execute_sql
             MCP->>DB: Run SQL
             DB-->>MCP: Rows / error
             MCP-->>BE: SQL result / error
         end
     else Toolset disabled
         BE->>LLM: Generate SQL (optional RAG hints)
-        BE->>MCP: mysql_execute_sql
+        BE->>MCP: postgres_execute_sql
         MCP->>DB: Run SQL
         DB-->>MCP: Rows / error
         MCP-->>BE: SQL result / error
@@ -77,41 +83,44 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
 ## Repository Layout
 
 ```
-├── mcp-backend/                      # Express server, MCP + provider orchestration
-│   ├── config.json                   # Persisted runtime configuration
-│   ├── reports/                      # Schema/tool snapshots, provider usage CSV
-│   ├── scripts/                      # Schema export, tool export, entity indexing helpers
-│   │   ├── generate-mysql-schema.js
-│   │   ├── export-toolset.js
-│   │   ├── create-admin.js
-│   │   ├── auto-build-entities.js    # Pull entities via MCP + push to retrieval service
-│   │   └── build-and-index-entities.js
+├── mcp-backend/                      # Express API + MCP orchestration
+│   ├── Dockerfile
+│   ├── prisma/                       # Prisma schemas (Postgres + Mongo)
+│   │   ├── schema.prisma
+│   │   └── mongo.prisma
+│   ├── reports/                      # Generated snapshots (schema, toolset, usage, logs)
+│   ├── scripts/
+│   │   ├── create-admin.js           # Seed the first admin user via env vars
+│   │   ├── export-prisma-schema.js   # Refresh Prisma schema + schema bundle
+│   │   └── export-logs.js            # Dump MongoDB training logs to reports/
 │   └── src/
-│       ├── controllers/              # Request handlers (auth, config, generate, debug, prompts)
+│       ├── app/                      # Express bootstrap (server + start)
+│       ├── controllers/              # Auth, generate, tools, prompts, sessions, debug
+│       ├── db/                       # Mongo connection helpers
 │       ├── middleware/               # JWT auth guards
-│       ├── models/                   # Mongoose models (users, sessions, training logs)
-│       ├── routes/                   # Express routers (auth, sessions, retrieval, tools)
-│       ├── services/                 # LLM providers, MCP bridge, embeddings, retrieval
-│       ├── utils/                    # Response helpers, etc.
-│       └── db/                       # Mongo connection helper
-├── mcp-ui/                           # Next.js 15 App Router frontend
-│   ├── src/app/                      # Pages (login, workspace)
-│   ├── src/components/home/          # Query/chat/history UI slices
-│   └── src/services/api.ts           # REST client (auth, config, sessions, prompts)
-├── models/                           # Embedding FastAPI reference implementation
-├── tools.yaml                        # MCP toolbox configuration (not committed by default)
-├── tools.yaml.example                # Template toolbox configuration
+│       ├── models/                   # Users, companies, branches, prompts, sessions
+│       ├── routes/                   # REST routes (auth, generate, retrieval, tools, etc.)
+│       ├── services/                 # LLM providers, planner, embeddings, MCP bridge
+│       └── utils/                    # Auth helpers, env loader, response helpers
+├── mcp-ui/                           # Next.js 15 workspace
+│   ├── Dockerfile
+│   ├── src/app/                      # Routes (login, workspace)
+│   ├── src/components/home/          # Chat/query/history UI building blocks
+│   └── src/services/api.ts           # Frontend REST client (auth, sessions, prompts, tools)
+├── config/tools.yaml                 # MCP toolbox definition mounted into the toolbox container
+├── models/gpt20_api.py               # Example FastAPI wrapper for a custom SQL LLM
+├── docker-compose.yml
 └── README.md
 ```
 
 ## Prerequisites
 
-- **Node.js 18+** and **npm 9+**
-- **MCP Toolbox** (CLI) with access to your database tools
-- **MySQL** database reachable by the toolbox
-- **MongoDB** (required for auth, sessions, prompts, and training logs)
-- **Python 3.10+** (only if you plan to run the optional embedding & retrieval FastAPI service)
-- **JWT secret** for signing API tokens (`JWT_SECRET`)
+- **Node.js 20+** and **npm 9+** (matches the Docker images shipped in this repo)
+- **MCP Toolbox** CLI configured with access to your target PostgreSQL instance
+- **PostgreSQL** reachable both from the toolbox and from the backend
+- **MongoDB** for authentication, sessions, prompts, and training logs
+- **Python 3.10+** only if you plan to run the optional FastAPI embedding/retrieval service
+- A strong **JWT secret** for signing API tokens (`JWT_SECRET`)
 
 ## Backend Setup (`mcp-backend/`)
 
@@ -122,33 +131,51 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
    npm install
    ```
 
-2. **Create `.env`** – copy from `.env.example` and fill in required secrets.
+2. **Create `.env`** – copy from `.env.example` and fill in required secrets. At minimum you need a JWT secret, provider credentials, and either `DATABASE_URL` or the individual `POSTGRES_*` variables.
 
    ```env
+   NODE_ENV=development
+   PORT=3001
+   CORS_ORIGIN=http://localhost:3000
+
+   PROMPT_COMPLETION_PROVIDER=deepseek
+   DEEPSEEK_API_KEY=sk-...
    GEMINI_API_KEY=
-   DEEPSEEK_API_KEY=
-   MCP_TOOLBOX_URL=http://localhost:3333
    CUSTOM_API_BASE=
-   EMBED_LLM_URL=http://localhost:8000    # FastAPI embedding + retrieval service
-   MYSQL_HOST=localhost
-   MYSQL_PORT=3306
-   MYSQL_USER=
-   MYSQL_PASSWORD=
-   MYSQL_DATABASE=
+   CUSTOM_API_TIMEOUT_MS=10000
+
+   MCP_TOOLBOX_URL=http://localhost:5173/.well-known/mcp/toolbox/sse
+   MCP_SSE_PATH=/.well-known/mcp/toolbox/sse
+   EMBED_LLM_URL=                   # optional embedding/retrieval service
+
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_USER=mcp
+   POSTGRES_PASSWORD=mcp
+   POSTGRES_DB=mcp
+   DATABASE_URL=postgresql://mcp:mcp@localhost:5432/mcp
+
    MONGO_URI=mongodb://localhost:27017/mcp
    MONGO_DB_NAME=mcp
+
    JWT_SECRET=super-secret-string
-   USE_RAG_HINTS=true                    # optional default toggle for entity hints
+   USE_RAG_HINTS=true
+
+   ADMIN_NAME="Sistem Yöneticisi"
+   ADMIN_EMAIL=admin@example.com
+   ADMIN_PASSWORD=Admin123!
+   COMPANY_NAME=DefaultCo
+   BRANCH_NAME=HQ
    ```
 
 3. **Generate schema & tool snapshots**
 
    ```bash
-   npm run schema:mysql          # writes reports/schema.summary.json
-   npm run export:toolset        # writes reports/toolset.snapshot.json
+   npm run export:prisma:schema    # writes reports/prisma.schema.prisma + schema.bundle.txt
+   npm run export:toolset          # writes reports/toolset.snapshot.json (toolbox must be running)
    ```
 
-   These files are served to the LLM and pushed to the embedding service; regenerate whenever the DB schema or toolset changes.
+   Re-run these scripts whenever the database schema or toolbox definitions change so the planner and embeddings stay up to date.
 
 4. **Bootstrap authentication**
 
@@ -156,7 +183,7 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
    npm run create:admin
    ```
 
-   The script prompts for admin credentials and writes the first user to MongoDB. You can also call `POST /auth/admin` directly if you prefer an API-only flow. After the admin exists, use the `/auth/login` endpoint (or UI login page) to obtain a JWT.
+   The script reads the `ADMIN_*` and organisation variables from your environment and seeds the first admin user in MongoDB. After an admin exists, new admins must authenticate before running the script or calling `POST /auth/admin`.
 
 5. **(Optional) Seed organizations & users**
 
@@ -173,22 +200,20 @@ Optional components (embedding service, entity retrieval, MongoDB analytics) are
 
 ### Tool Planner, Retrieval & Snapshots
 
-- Planner requests flow through `reports/schema.summary.json` and `reports/toolset.snapshot.json`. Keep these files fresh to improve embedding accuracy.
-- The embedding service endpoint defined by `EMBED_LLM_URL` must expose:
+- Planner requests read from `reports/prisma.schema.prisma`, fall back to `reports/schema.bundle.txt`, and finally `reports/schema.summary.json` if present. Keep these snapshots current to improve planner accuracy.
+- The embedding service configured via `EMBED_LLM_URL` should expose:
   - `POST /rank/tools`
   - `POST /rank/tables`
   - `POST /embed`
-  - `POST /entities/index`
   - `POST /entities/search`
-  - `PUT /config/toolset` / `PUT /config/schema`
-  - `GET /toolset/info`
-- Sync snapshots manually or from the UI via `/api/config/embed-sync`.
+  - `GET /toolset/info` (optional health/metadata probe)
+- Refresh the snapshots on disk with `npm run export:prisma:schema` and `npm run export:toolset` as your schema or toolbox changes; the backend reads them lazily at runtime.
 
 ### Entity Retrieval & RAG Hints
 
-- `node scripts/auto-build-entities.js --out reports/entities.json` fetches distinct entities via MCP (e.g., locations, device types), writes them to JSON, and pushes them to the embedding service. Add `--schema <path>` to override the default `reports/schema.summary.json` source.
-- `node scripts/build-and-index-entities.js reports/entities.json` reads a prepared entity list and indexes it into the retrieval service.
-- Once entities are indexed, enabling **RAG Hints** (toggle in the UI header or `useRagHints` in the API request) injects top-matching entities into planner prompts and SQL generation, nudging the model toward the correct filters.
+- Set `EMBED_LLM_URL` to an embedding/retrieval API that provides `/rank/tools`, `/rank/tables`, `/embed`, and `/entities/search`. If it is unset, the planner simply skips embedding-powered hints.
+- Populate `reports/entities.json` with domain-specific entities (locations, devices, etc.) and index them into your retrieval service using your own data pipeline. The backend will include the top matches when RAG hints are enabled.
+- Toggle **RAG Hints** in the UI header (or pass `useRagHints` in `POST /api/generate`) to inject entity hints into the planner and SQL generation prompts.
 
 ## Frontend Setup (`mcp-ui/`)
 
@@ -219,37 +244,41 @@ Visit [http://localhost:3000](http://localhost:3000) and log in with the admin/u
 
 ## Working with MCP & Toolsets
 
-- Define your MCP tools in `tools.yaml` (copy from `tools.yaml.example`).
-- Start the toolbox (`toolbox --ui`) so the backend can list tools and execute them.
-- The chat/query panels include a **“Prefer MCP tool execution”** toggle; either state is sent with the `POST /api/generate` request so you can experiment without touching persisted config.
-- The Config tab lets you edit system prompts, default provider, and toolset flags. Saving updates `config.json` and triggers an embedding sync when possible.
-- Saved sessions capture planner summaries, tool calls, SQL, execution result rows, and debug payloads—perfect for audits or fine-tuning.
+- Define your MCP tools in `config/tools.yaml`. The docker-compose stack mounts this file into the toolbox container.
+- Start the toolbox (`toolbox --ui` or your preferred launch command) so the backend can list tools and execute them.
+- The chat/query panels include a **“Toolset”** toggle that maps to `useToolset` on `POST /api/generate`, letting you compare planner-driven tool usage versus direct SQL.
+- Saved sessions capture planner summaries, tool calls, SQL text, execution results, and debug payloads—handy for audits or fine-tuning data collection.
 
 ## Key API Endpoints
 
 | Method & Path                              | Description                                                                                                                              |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /auth/admin`                         | Bootstrap the first admin user (idempotent once an admin exists).                                                                        |
+| `GET /health`                              | Lightweight health probe.                                                                                                               |
+| `POST /auth/admin`                         | Bootstrap the first admin user (requires an admin token after the first run).                                                           |
 | `POST /auth/login`                         | Username/password login; returns `{ token, user }`.                                                                                      |
-| `GET /auth/me`                             | Returns the authenticated user with company/branch context.                                                                              |
-| `POST /auth/companies`                     | Create a company (admin only).                                                                                                           |
-| `POST /auth/branches`                      | Create a branch tied to a company (admin only).                                                                                          |
-| `POST /auth/users`                         | Invite an additional user (admin only).                                                                                                  |
-| `POST /api/generate`                       | Main entry point: accepts `{ prompt, provider?, model?, useToolset?, toolsetName?, useRagHints?, schema? }` and returns SQL/tool output. |
-| `GET /api/config` / `PUT /api/config`      | Fetch or persist runtime configuration; PUT triggers embedding syncs when possible.                                                      |
-| `POST /api/config/embed-sync`              | Manually push the latest schema/toolset snapshots to the embedding service.                                                              |
-| `GET /tools` / `POST /tool`                | List or invoke MCP tools directly via the toolbox.                                                                                       |
-| `GET /prompts` / `POST /prompts`           | Saved prompt library CRUD for the authenticated user.                                                                                    |
-| `GET /sessions` / `POST /sessions`         | Manage chat sessions; use `POST /sessions/:id/messages` to append conversation turns.                                                    |
-| `GET /debug/status` / `POST /debug/toggle` | Inspect or flip verbose debug mode.                                                                                                      |
-| `GET /retrieval/search`                    | Proxy to the embedding service for entity search; query via `?query=...&types=device_name,location&limit=5`.                             |
+| `GET /auth/me`                             | Return the authenticated user with company/branch context.                                                                              |
+| `POST /auth/companies` / `GET /auth/companies` | Create or list companies (create requires admin).                                                                                   |
+| `POST /auth/branches` / `GET /auth/branches` | Create or list branches (create requires admin).                                                                                    |
+| `POST /auth/users` / `GET /auth/users`     | Invite or list additional users (admin only).                                                                                           |
+| `POST /api/generate`                       | Main entry point: accepts `{ prompt, provider?, model?, useToolset?, useRagHints?, schema? }` and returns SQL/tool output.               |
+| `GET /tools` / `POST /tool`                | List or invoke MCP tools directly (admin only).                                                                                          |
+| `GET /prompts` / `POST /prompts`           | Saved prompt library operations for the authenticated user.                                                                             |
+| `GET /sessions` / `POST /sessions`         | List or create chat sessions for the logged-in user.                                                                                    |
+| `POST /sessions/:id/messages`              | Append conversation turns to a session.                                                                                                 |
+| `PATCH /sessions/:id` / `DELETE /sessions/:id` | Rename or delete a chat session.                                                                                                    |
+| `GET /debug/status` / `POST /debug/toggle` | Inspect or change verbose debug mode (admin only).                                                                                      |
+| `GET /retrieval/search`                    | Proxy to the embedding service for entity search; accepts `query`, optional `types`, and `limit`.                                       |
+| `GET /schema/bundle`                       | Download the most recent Prisma schema bundle generated by `export:prisma:schema`.                                                      |
 
 ## Observability & Reports
 
+- `mcp-backend/reports/prisma.schema.prisma` – snapshot produced by `npm run export:prisma:schema`.
+- `mcp-backend/reports/schema.bundle.txt` – Prisma schema + Postgres views in one file (also from `export:prisma:schema`).
+- `mcp-backend/reports/schema.summary.json` – optional hand-curated summary consumed by the planner when present.
+- `mcp-backend/reports/toolset.snapshot.json` – exported MCP tool metadata (`npm run export:toolset`).
 - `mcp-backend/reports/deepseek_usage.csv` – provider token usage appended by `updateUsageCsv`.
-- `mcp-backend/reports/schema.summary.json` – latest schema snapshot consumed by the LLM and embedding service.
-- `mcp-backend/reports/toolset.snapshot.json` – exported tool metadata used for embeddings.
-- `mcp-backend/reports/entities.json` (optional) – entity export generated by the auto-build script.
+- `mcp-backend/reports/entities.json` – optional entity export you can manage manually for retrieval hints.
+- `mcp-backend/reports/training_logs.*.json` – archives produced by `node scripts/export-logs.js`.
 - MongoDB collections `training_logs`, `sessions`, `saved_prompts`, `users`, `companies`, and `branches` provide end-to-end observability.
 
 Enable debug mode from the UI header or `/debug/toggle` to stream planner traces, token counts, tool arguments, and SQL execution payloads.
@@ -257,7 +286,7 @@ Enable debug mode from the UI header or `/debug/toggle` to stream planner traces
 ## Development Tips
 
 - The backend uses ES modules; npm scripts already pass the correct loader flags.
-- When modifying schema or tool definitions, regenerate snapshots and run `/api/config/embed-sync` to keep the embedding service aligned.
+- When the database schema or tool definitions change, rerun `npm run export:prisma:schema` and `npm run export:toolset` while the toolbox is reachable so embeddings stay current.
 - MongoDB connectivity is required for login; watch the console for `MongoDB connected` logs to confirm.
 - Entity retrieval is best-effort—if the embedding service is offline, the planner falls back gracefully while logging a warning.
 
@@ -265,7 +294,7 @@ Enable debug mode from the UI header or `/debug/toggle` to stream planner traces
 
 Released under the [MIT License](LICENSE). Contributions and feature ideas are welcome—open an issue or submit a pull request.
 
-## Docker (Backend + MongoDB + MySQL)
+## Docker (Backend + MongoDB + postgres)
 
 1. Build and run services:
 
@@ -276,23 +305,24 @@ Released under the [MIT License](LICENSE). Contributions and feature ideas are w
 2. Environment:
 
    - The compose file wires sensible defaults. To override secrets (e.g., `DEEPSEEK_API_KEY`, `JWT_SECRET`), export them in your shell before running compose or create a `.env` file in the repo root with those variables.
-   - Backend connects to services by name: `mysql` and `mongo`.
+   - Backend connects to services by name: `postgres` and `mongo`.
 
 3. Access:
 
    - Backend API: `http://localhost:3001`
-   - MySQL: `localhost:3306` (user `mcp` / pass `mcp` / db `mcp`)
+   - PostgreSQL: `localhost:5432` (user `mcp` / pass `mcp` / db `mcp`)
+   - MCP Toolbox UI (optional): `http://localhost:5173`
    - MongoDB: `localhost:27017`
 
 4. First-time setup inside Docker:
 
    ```bash
    # Generate schema snapshot and toolset (optional but recommended)
-   docker compose exec backend npm run schema:mysql
+   docker compose exec backend npm run export:prisma:schema
    docker compose exec backend npm run export:toolset
 
    # Create initial admin
-   docker compose exec backend node ./scripts/create-admin.js
+   docker compose exec backend npm run create:admin
    ```
 
 5. Logs:

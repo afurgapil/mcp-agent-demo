@@ -55,9 +55,6 @@
     "prompt": "Find locations that have no devices assigned (by name match)"
   },
   { "prompt": "Devices created per month in the current year" },
-  {
-    "prompt": "Median time between consecutive logs per signal (MySQL 8 window functions)"
-  },
   { "prompt": "Show the first and last log time per signal" },
   { "prompt": "Find signals recorded between 2025-09-01 and 2025-09-30" },
   {

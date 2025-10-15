@@ -1,7 +1,6 @@
 import { readFileSync, existsSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { execFile } from "child_process";
-// Switched from MySQL to PostgreSQL
 import { Client as PgClient } from "pg";
 import { fileURLToPath } from "url";
 import { callTool, listTools } from "../services/mcp.service.js";

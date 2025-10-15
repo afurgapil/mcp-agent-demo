@@ -18,6 +18,26 @@ const { origin: MCP_ORIGIN, path: MCP_PATH_IN_BASE } =
   splitBaseAndPath(MCP_BASE_RAW);
 const MCP_BASE = MCP_ORIGIN.replace(/\/$/, "");
 
+function buildOriginCandidates() {
+  const candidates = new Set();
+  if (MCP_BASE) candidates.add(MCP_BASE);
+  // Provide sensible localhost fallbacks when running outside docker compose.
+  try {
+    const u = MCP_BASE ? new URL(MCP_BASE) : null;
+    const protocol = u?.protocol || "http:";
+    const port = u?.port ? `:${u.port}` : MCP_BASE ? "" : ":5173";
+    if (!u || (u.hostname !== "localhost" && u.hostname !== "127.0.0.1")) {
+      candidates.add(`${protocol}//localhost${port}`);
+      candidates.add(`${protocol}//127.0.0.1${port}`);
+    }
+  } catch {
+    candidates.add("http://localhost:5173");
+    candidates.add("http://127.0.0.1:5173");
+  }
+  if (!candidates.size) candidates.add("http://localhost:5173");
+  return Array.from(candidates);
+}
+
 function buildSseCandidates() {
   const explicitFromEnv =
     MCP_SSE_PATH && MCP_SSE_PATH.startsWith("/") ? MCP_SSE_PATH : null;
@@ -56,22 +76,25 @@ export async function getMcpClient() {
         console.log("[MCP] SSE Path:", MCP_SSE_PATH || "<unspecified>");
       } catch {}
       const candidates = buildSseCandidates();
+      const origins = buildOriginCandidates();
       let lastErr;
       const attempts = Number(process.env.MCP_CONNECT_RETRIES || 12);
       const delayMs = Number(process.env.MCP_CONNECT_DELAY_MS || 2500);
       for (let i = 0; i < attempts; i++) {
-        for (const path of candidates) {
-          try {
-            const sseUrl = new URL(path, MCP_BASE + "/");
-            const transport = new SSEClientTransport(sseUrl);
-            const client = new Client({
-              name: "mcp-agent-backend",
-              version: "0.3.0",
-            });
-            await client.connect(transport);
-            return client;
-          } catch (err) {
-            lastErr = err;
+        for (const origin of origins) {
+          for (const path of candidates) {
+            try {
+              const sseUrl = new URL(path, origin + "/");
+              const transport = new SSEClientTransport(sseUrl);
+              const client = new Client({
+                name: "mcp-agent-backend",
+                version: "0.3.0",
+              });
+              await client.connect(transport);
+              return client;
+            } catch (err) {
+              lastErr = err;
+            }
           }
         }
         await new Promise((r) => setTimeout(r, delayMs));

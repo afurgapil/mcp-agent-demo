@@ -3,24 +3,9 @@
 import { useEffect, useState } from "react";
 import BulkInsertModal from "./BulkInsertModal";
 import DataPreviewModal from "./DataPreviewModal";
+import { toolService } from "../../services/toolService";
 
-export default function BulkInsertTab({
-  fetchTables,
-  describeTable,
-  viewTableData,
-  executeSql,
-}: {
-  fetchTables: () => Promise<string[]>;
-  describeTable: (
-    table: string
-  ) => Promise<Array<Record<string, unknown>> | null>;
-  viewTableData: (
-    table: string,
-    limit: number,
-    offset: number
-  ) => Promise<Array<Record<string, unknown>>>;
-  executeSql: (sql: string) => Promise<unknown>;
-}) {
+export default function BulkInsertTab() {
   const [tables, setTables] = useState<string[]>([]);
   const [filterQuery, setFilterQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -44,15 +29,58 @@ export default function BulkInsertTab({
       setLoading(true);
       setError(null);
       try {
-        const xs = await fetchTables();
-        setTables(xs);
+        const result = await toolService.getTables();
+        if (result.success && result.data) {
+          // Parse the result to extract table names
+          let tableNames: string[] = [];
+
+          if (
+            (result.data as { rows?: Array<Record<string, unknown>> }).rows &&
+            Array.isArray(
+              (result.data as { rows?: Array<Record<string, unknown>> }).rows
+            )
+          ) {
+            tableNames = (
+              result.data as { rows: Array<Record<string, unknown>> }
+            ).rows.map((row: Record<string, unknown>) => {
+              const firstValue = Object.values(row)[0];
+              return typeof firstValue === "string"
+                ? firstValue
+                : String(firstValue);
+            });
+          } else if (
+            (result.data as { content?: Array<unknown> }).content &&
+            Array.isArray((result.data as { content?: Array<unknown> }).content)
+          ) {
+            tableNames = (result.data as { content: Array<unknown> }).content
+              .map((item: unknown) => {
+                const asObj = item as { text?: string };
+                if (asObj.text) {
+                  try {
+                    const parsed = JSON.parse(asObj.text as string);
+                    const firstValue = Object.values(parsed)[0];
+                    return typeof firstValue === "string"
+                      ? firstValue
+                      : String(firstValue);
+                  } catch {
+                    return asObj.text as string;
+                  }
+                }
+                return null;
+              })
+              .filter((v): v is string => typeof v === "string");
+          }
+
+          setTables(tableNames);
+        } else {
+          setError(result.error || "Failed to load tables");
+        }
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to load tables");
       } finally {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmit = async ({
@@ -91,9 +119,13 @@ export default function BulkInsertTab({
         )
         .join(",\n");
       const columnSql = columns.map((c) => `\`${c}\``).join(", ");
-      const sql = `INSERT INTO \`${table}\` (${columnSql}) VALUES\n${valuesSql};`;
-      const res = await executeSql(sql);
-      setLastResult(res ?? { ok: true });
+      const sql = `INSERT INTO "${table}" (${columnSql}) VALUES\n${valuesSql};`;
+      const result = await toolService.executeSql(sql);
+      if (result.success) {
+        setLastResult(result.data ?? { ok: true });
+      } else {
+        throw new Error(result.error || "Insert failed");
+      }
       setOpen(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Insert failed");
@@ -118,8 +150,57 @@ export default function BulkInsertTab({
               setLoading(true);
               setError(null);
               try {
-                const xs = await fetchTables();
-                setTables(xs);
+                const result = await toolService.getTables();
+                if (result.success && result.data) {
+                  let tableNames: string[] = [];
+
+                  if (
+                    (result.data as { rows?: Array<Record<string, unknown>> })
+                      .rows &&
+                    Array.isArray(
+                      (result.data as { rows?: Array<Record<string, unknown>> })
+                        .rows
+                    )
+                  ) {
+                    tableNames = (
+                      result.data as { rows: Array<Record<string, unknown>> }
+                    ).rows.map((row: Record<string, unknown>) => {
+                      const firstValue = Object.values(row)[0];
+                      return typeof firstValue === "string"
+                        ? firstValue
+                        : String(firstValue);
+                    });
+                  } else if (
+                    (result.data as { content?: Array<unknown> }).content &&
+                    Array.isArray(
+                      (result.data as { content?: Array<unknown> }).content
+                    )
+                  ) {
+                    tableNames = (
+                      result.data as { content: Array<unknown> }
+                    ).content
+                      .map((item: unknown) => {
+                        const asObj = item as { text?: string };
+                        if (asObj.text) {
+                          try {
+                            const parsed = JSON.parse(asObj.text as string);
+                            const firstValue = Object.values(parsed)[0];
+                            return typeof firstValue === "string"
+                              ? firstValue
+                              : String(firstValue);
+                          } catch {
+                            return asObj.text as string;
+                          }
+                        }
+                        return null;
+                      })
+                      .filter((v): v is string => typeof v === "string");
+                  }
+
+                  setTables(tableNames);
+                } else {
+                  setError(result.error || "Failed to load tables");
+                }
               } catch (err: unknown) {
                 setError(
                   err instanceof Error ? err.message : "Failed to load tables"
@@ -182,8 +263,57 @@ export default function BulkInsertTab({
                           setSelectedForInsert(t);
                           setOpen(true);
                           try {
-                            const rows = await describeTable(t);
-                            setSchemaRows(rows || null);
+                            const result = await toolService.describeTable(t);
+                            if (result.success && result.data) {
+                              let schemaRows: Array<Record<string, unknown>> =
+                                [];
+
+                              if (
+                                (
+                                  result.data as {
+                                    rows?: Array<Record<string, unknown>>;
+                                  }
+                                ).rows &&
+                                Array.isArray(
+                                  (
+                                    result.data as {
+                                      rows?: Array<Record<string, unknown>>;
+                                    }
+                                  ).rows
+                                )
+                              ) {
+                                schemaRows = (
+                                  result.data as {
+                                    rows: Array<Record<string, unknown>>;
+                                  }
+                                ).rows;
+                              } else if (
+                                (result.data as { content?: Array<unknown> })
+                                  .content &&
+                                Array.isArray(
+                                  (result.data as { content?: Array<unknown> })
+                                    .content
+                                )
+                              ) {
+                                schemaRows = (
+                                  result.data as { content: Array<unknown> }
+                                ).content.map((item: unknown) => {
+                                  const asObj = item as { text?: string };
+                                  if (asObj.text) {
+                                    try {
+                                      return JSON.parse(asObj.text);
+                                    } catch {
+                                      return { text: asObj.text };
+                                    }
+                                  }
+                                  return item as Record<string, unknown>;
+                                });
+                              }
+
+                              setSchemaRows(schemaRows);
+                            } else {
+                              setSchemaRows(null);
+                            }
                           } catch {
                             setSchemaRows(null);
                           }
@@ -197,8 +327,60 @@ export default function BulkInsertTab({
                           try {
                             setPreviewTable(t);
                             setPreviewOpen(true);
-                            const rows = await viewTableData(t, 50, 0);
-                            setPreviewRows(rows);
+                            const result = await toolService.getTableData(
+                              t,
+                              50,
+                              0
+                            );
+                            if (result.success && result.data) {
+                              let rows: Array<Record<string, unknown>> = [];
+
+                              if (
+                                (
+                                  result.data as {
+                                    rows?: Array<Record<string, unknown>>;
+                                  }
+                                ).rows &&
+                                Array.isArray(
+                                  (
+                                    result.data as {
+                                      rows?: Array<Record<string, unknown>>;
+                                    }
+                                  ).rows
+                                )
+                              ) {
+                                rows = (
+                                  result.data as {
+                                    rows: Array<Record<string, unknown>>;
+                                  }
+                                ).rows;
+                              } else if (
+                                (result.data as { content?: Array<unknown> })
+                                  .content &&
+                                Array.isArray(
+                                  (result.data as { content?: Array<unknown> })
+                                    .content
+                                )
+                              ) {
+                                rows = (
+                                  result.data as { content: Array<unknown> }
+                                ).content.map((item: unknown) => {
+                                  const asObj = item as { text?: string };
+                                  if (asObj.text) {
+                                    try {
+                                      return JSON.parse(asObj.text);
+                                    } catch {
+                                      return { text: asObj.text };
+                                    }
+                                  }
+                                  return item as Record<string, unknown>;
+                                });
+                              }
+
+                              setPreviewRows(rows);
+                            } else {
+                              setPreviewRows([]);
+                            }
                           } catch {
                             setPreviewRows([]);
                           }
@@ -229,8 +411,46 @@ export default function BulkInsertTab({
         onSubmit={handleSubmit}
         onSelectTable={async (tbl) => {
           try {
-            const rows = await describeTable(tbl);
-            setSchemaRows(rows || null);
+            const result = await toolService.describeTable(tbl);
+            if (result.success && result.data) {
+              let schemaRows: Array<Record<string, unknown>> = [];
+
+              if (
+                (result.data as { rows?: Array<Record<string, unknown>> })
+                  .rows &&
+                Array.isArray(
+                  (result.data as { rows?: Array<Record<string, unknown>> })
+                    .rows
+                )
+              ) {
+                schemaRows = (
+                  result.data as { rows: Array<Record<string, unknown>> }
+                ).rows;
+              } else if (
+                (result.data as { content?: Array<unknown> }).content &&
+                Array.isArray(
+                  (result.data as { content?: Array<unknown> }).content
+                )
+              ) {
+                schemaRows = (
+                  result.data as { content: Array<unknown> }
+                ).content.map((item: unknown) => {
+                  const asObj = item as { text?: string };
+                  if (asObj.text) {
+                    try {
+                      return JSON.parse(asObj.text);
+                    } catch {
+                      return { text: asObj.text };
+                    }
+                  }
+                  return item as Record<string, unknown>;
+                });
+              }
+
+              setSchemaRows(schemaRows);
+            } else {
+              setSchemaRows(null);
+            }
           } catch {
             setSchemaRows(null);
           }
